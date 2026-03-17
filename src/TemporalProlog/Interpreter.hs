@@ -258,7 +258,7 @@ computeStrata prog =
   in result
 
 fixStrata :: Map Name [(Name, DepKind)] -> Map Name Int -> Int -> Map Name Int
-fixStrata _ m 0 = Map.map (const 0) m  -- Diverged: fall back to single stratum
+fixStrata _ _ 0 = error "Program is not stratifiable: negative dependency cycle detected"
 fixStrata deps m fuel =
   let m' = Map.mapWithKey (updateStratum deps m) m
   in if m' == m then m else fixStrata deps m' (fuel - 1)
