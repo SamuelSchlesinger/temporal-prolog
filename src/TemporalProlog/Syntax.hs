@@ -31,6 +31,7 @@ data Cond
   | CAfter Cond Cond     -- c after d
   | CFor Cond Int        -- c for n
   | CAnd [Cond]          -- c1 /\ c2 /\ ...
+  | CEventually Cond     -- eventually / ◇ (synonym for once in past-time)
   deriving (Eq, Ord, Show)
 
 -- | Result formulas (rule heads)
@@ -40,6 +41,7 @@ data Result
   | RUntil Result Cond   -- r until c
   | RAtNext Result Cond  -- r atnext c
   | RAnd [Result]        -- r1 /\ r2
+  | RNext Result          -- next / ○ (result holds at next time step)
   deriving (Eq, Ord, Show)
 
 -- | A rule: condition => result, or a bare fact
@@ -109,6 +111,7 @@ applySubstCond s (CSince c d)   = CSince (applySubstCond s c) (applySubstCond s 
 applySubstCond s (CAfter c d)   = CAfter (applySubstCond s c) (applySubstCond s d)
 applySubstCond s (CFor c n)     = CFor (applySubstCond s c) n
 applySubstCond s (CAnd cs)      = CAnd (map (applySubstCond s) cs)
+applySubstCond s (CEventually c) = CEventually (applySubstCond s c)
 
 -- | Apply a substitution to a result
 applySubstResult :: Subst -> Result -> Result
@@ -117,6 +120,7 @@ applySubstResult s (RAlways r)    = RAlways (applySubstResult s r)
 applySubstResult s (RUntil r c)   = RUntil (applySubstResult s r) (applySubstCond s c)
 applySubstResult s (RAtNext r c)  = RAtNext (applySubstResult s r) (applySubstCond s c)
 applySubstResult s (RAnd rs)      = RAnd (map (applySubstResult s) rs)
+applySubstResult s (RNext r)      = RNext (applySubstResult s r)
 
 -- | Apply substitution to a normal condition
 applySubstNormalCond :: Subst -> NormalCond -> NormalCond
@@ -143,6 +147,7 @@ fvCond (CSince c d) = Set.union (fvCond c) (fvCond d)
 fvCond (CAfter c d) = Set.union (fvCond c) (fvCond d)
 fvCond (CFor c _)   = fvCond c
 fvCond (CAnd cs)    = Set.unions (map fvCond cs)
+fvCond (CEventually c) = fvCond c
 
 -- | Free variables in a result
 fvResult :: Result -> Set Var
@@ -151,6 +156,7 @@ fvResult (RAlways r)   = fvResult r
 fvResult (RUntil r c)  = Set.union (fvResult r) (fvCond c)
 fvResult (RAtNext r c) = Set.union (fvResult r) (fvCond c)
 fvResult (RAnd rs)     = Set.unions (map fvResult rs)
+fvResult (RNext r)     = fvResult r
 
 -- | Free variables in a rule
 fvRule :: Rule -> Set Var

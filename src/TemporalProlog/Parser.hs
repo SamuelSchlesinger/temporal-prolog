@@ -79,11 +79,11 @@ opOnce = lexeme (char '?' <|> char '\x25C6')  -- ◆
 kwAlways :: Parser ()
 kwAlways = void (symbol "always" <|> symbol "\x25A1")  -- □
 
-_kwEventually :: Parser ()
-_kwEventually = void (symbol "eventually" <|> symbol "\x25C7")  -- ◇
+kwEventually :: Parser ()
+kwEventually = void (symbol "eventually" <|> symbol "\x25C7")  -- ◇
 
-_kwNext :: Parser ()
-_kwNext = void (symbol "next" <|> symbol "\x25CB")  -- ○
+kwNext :: Parser ()
+kwNext = void (symbol "next" <|> symbol "\x25CB")  -- ○
 
 kwSince :: Parser ()
 kwSince = void (symbol "since")
@@ -218,6 +218,7 @@ pCondUnary = choice
   , do _ <- opPrev; c <- pCondUnary; return (CPrev c)
   , do _ <- opHasBeen; c <- pCondUnary; return (CHasBeen c)
   , do _ <- opOnce; c <- pCondUnary; return (COnce c)
+  , do kwEventually; c <- pCondUnary; return (CEventually c)
   , pCondAtom
   ]
 
@@ -253,6 +254,7 @@ pResultUntilAtNext = do
 pResultUnary :: Parser Result
 pResultUnary = choice
   [ do kwAlways; r <- pResultUnary; return (RAlways r)
+  , do kwNext; r <- pResultUnary; return (RNext r)
   , pResultAtom
   ]
 
