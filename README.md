@@ -50,7 +50,7 @@ Type :help for available commands.
 
 ```
 > :load examples/foot_warmer.tpl
-Loaded 2 rules and 0 pattern functions from examples/foot_warmer.tpl
+Loaded 3 rules and 0 pattern functions from examples/foot_warmer.tpl
 ```
 
 ### Step through worlds
@@ -58,12 +58,13 @@ Loaded 2 rules and 0 pattern functions from examples/foot_warmer.tpl
 Assert some facts and advance time:
 
 ```
-> :assert hot(room1)
+> :assert hot(heater)
 > :step
 0> :world
 World 0:
-  hot(room1)
-  off(room1)
+  device(heater)
+  hot(heater)
+  off(heater)
 ```
 
 Step again without asserting anything:
@@ -72,10 +73,13 @@ Step again without asserting anything:
 0> :step
 1> :world
 World 1:
+  device(heater)
+  on(heater)
 ```
 
-World 1 is empty because no facts were asserted, and the rule `~hot(X) => on(X)`
-cannot produce ground results when `X` is unbound (see [Notes on negation](#notes-on-negation)).
+In world 1 no `hot(heater)` is asserted, so `~hot(heater)` succeeds and the
+controller turns the heater on. The `device(heater)` fact binds `X` before the
+negation check, ensuring ground results (see [Notes on negation](#notes-on-negation)).
 
 Use `:history` to see all worlds at once.
 
@@ -176,31 +180,34 @@ on/off controller:
 
 ```prolog
 % foot_warmer.tpl
-hot(X) => off(X).
-~hot(X) => on(X).
+device(heater).
+device(X) /\ hot(X) => off(X).
+device(X) /\ ~hot(X) => on(X).
 ```
 
 REPL session:
 
 ```
 > :load examples/foot_warmer.tpl
-Loaded 2 rules and 0 pattern functions from examples/foot_warmer.tpl
-> :assert hot(room1)
+Loaded 3 rules and 0 pattern functions from examples/foot_warmer.tpl
+> :assert hot(heater)
 > :step
 0> :world
 World 0:
-  hot(room1)
-  off(room1)
+  device(heater)
+  hot(heater)
+  off(heater)
 0> :step
 1> :world
 World 1:
+  device(heater)
+  on(heater)
 ```
 
-When `hot(room1)` is asserted, the controller derives `off(room1)` (the
-asserted fact also appears in the world). World 1 is empty because no facts
-were asserted, and `~hot(X) => on(X)` with an unbound `X` succeeds at
-negation but produces the non-ground atom `on(X)`, which is filtered out.
-Using ground rules like `~hot(heater) => on(heater)` would work as expected.
+When `hot(heater)` is asserted, the controller derives `off(heater)`. In
+world 1 no `hot` fact is asserted, so `~hot(heater)` succeeds and the
+controller derives `on(heater)`. The `device(heater)` domain fact binds `X`
+before the negation check, ensuring ground results.
 
 ### Mutual exclusion
 
@@ -276,6 +283,9 @@ condition:
 r(X) /\ ~p(X) => q(X).    % correct: X is bound by r(X) first
 ~p(X) => q(X).             % X is unbound — the safety validator warns
 ```
+
+The foot warmer example demonstrates this pattern: `device(X) /\ ~hot(X) => on(X)`
+uses the domain fact `device(heater)` to bind `X` before the negation check.
 
 ## References
 

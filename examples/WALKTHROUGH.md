@@ -36,14 +36,16 @@ Load the foot warmer controller:
 
 ```
 > :load examples/foot_warmer.tpl
-Loaded 2 rules and 0 pattern functions from examples/foot_warmer.tpl
+Loaded 3 rules and 0 pattern functions from examples/foot_warmer.tpl
 > :program
 === Source Program ===
-hot(X) => off(X).
-~hot(X) => on(X).
+device(heater).
+device(X) /\ hot(X) => off(X).
+device(X) /\ ~hot(X) => on(X).
 === Normalized Program ===
-hot(X) => off(X).
-~hot(X) => on(X).
+device(heater).
+device(X) /\ hot(X) => off(X).
+device(X) /\ ~hot(X) => on(X).
 ```
 
 ## 2. Asserting facts and stepping
@@ -55,30 +57,39 @@ Assert that device `heater` is hot, then advance one time step:
 > :step
 0> :world
 World 0:
+  device(heater)
   hot(heater)
   off(heater)
 ```
 
-The rule `hot(X) => off(X)` fired. Now suppose the heater cools down — we
-assert nothing about it being hot and step again:
+The domain fact `device(heater)` binds `X=heater`. Since `hot(heater)` is
+asserted, the rule `device(X) /\ hot(X) => off(X)` fires and derives
+`off(heater)`. The negation rule does not fire because `~hot(heater)` fails.
+
+Now suppose the heater cools down — we assert nothing about it being hot and
+step again:
 
 ```
 0> :step
 1> :world
 World 1:
+  device(heater)
+  on(heater)
 ```
 
 Under the Closed World Assumption, `hot(heater)` is no longer true at world 1.
-The rule `~hot(X) => on(X)` has negation succeed (no `hot` facts), but `X`
-remains unbound so `on(X)` is non-ground and is filtered out. World 1 is empty.
+The rule `device(X) /\ ~hot(X) => on(X)` fires: `device(heater)` binds
+`X=heater`, then `~hot(heater)` succeeds (ground check), so `on(heater)` is
+derived.
 
 ## 3. Querying
 
 ```
 1> :query off(X)
 No.
-1> :query hot(X)
-No.
+1> :query on(X)
+Yes.
+  X = heater
 ```
 
 ## 4. Viewing history
@@ -86,9 +97,12 @@ No.
 ```
 1> :history
 World 0:
+  device(heater)
   hot(heater)
   off(heater)
 World 1:
+  device(heater)
+  on(heater)
 ```
 
 ---
@@ -102,7 +116,11 @@ State reset.
 Loaded 6 rules and 0 pattern functions from examples/traffic_light.tpl
 ```
 
-Start the light in `green` and let the timer run without expiring:
+The traffic light uses `@`-based persistence: each rule checks the previous
+world with `@` and derives the current colour (or schedules the next one via
+`next`).
+
+Start the light in `green`:
 
 ```
 > :assert green
@@ -112,8 +130,10 @@ World 0:
   green
 ```
 
-The persistence rule `green /\ ~timer_expired => next green` keeps the light
-green across worlds. Step again without asserting `timer_expired`:
+World 0 has `green` (asserted). All `@` rules look at the previous world,
+which does not exist at world 0, so nothing else fires.
+
+Step without asserting `timer_expired` — the persistence rule fires:
 
 ```
 0> :step
@@ -122,6 +142,9 @@ World 1:
   green
 ```
 
+`@green` succeeds (world 0 had `green`), and `~timer_expired` succeeds, so
+`green` is derived via persistence.
+
 Now trigger the timer:
 
 ```
@@ -129,14 +152,13 @@ Now trigger the timer:
 1> :step
 2> :world
 World 2:
-  green
   timer_expired
 ```
 
-At world 2, the previous world's `green` carries forward (via the `next`
-persistence auxiliary), and `timer_expired` is asserted. The transition rule
-`green /\ timer_expired => next yellow` fires, scheduling `yellow` for the
-next world. On the next step, the timer is no longer asserted:
+`@green` succeeds (world 1 had `green`). `timer_expired` is asserted. The
+transition rule `@green /\ timer_expired => next yellow` fires, scheduling
+`yellow` for the next world. The persistence rule `@green /\ ~timer_expired`
+does not fire because `timer_expired` is present.
 
 ```
 2> :step
@@ -144,6 +166,9 @@ next world. On the next step, the timer is no longer asserted:
 World 3:
   yellow
 ```
+
+The `next yellow` from world 2 materialises. `@yellow` now succeeds, and
+`~timer_expired` succeeds, so `yellow` persists.
 
 Trigger the timer again to move to red:
 
@@ -153,7 +178,6 @@ Trigger the timer again to move to red:
 4> :world
 World 4:
   timer_expired
-  yellow
 ```
 
 ```
@@ -170,7 +194,6 @@ And once more back to green:
 5> :step
 6> :world
 World 6:
-  red
   timer_expired
 ```
 
@@ -262,7 +285,7 @@ between the term `temperature(X)` and `100`), which is not what we want.
   At world 0 there is no prior world, so `@p` is always false.
 - **`next` in rule heads**: the derived atom appears in the *next* world, not
   the current one.
-- **Non-ground negation**: when a negated condition like `~hot(X)` succeeds
-  with unbound variables, the head remains non-ground and is filtered out.
-  Negated conditions should be "safe" — all variables should be bound by
-  positive conditions first.
+- **Domain-bounded negation**: a negated condition like `~hot(X)` needs `X`
+  to be bound by a positive condition first. Use a domain fact such as
+  `device(X)` to bind `X`, then `~hot(X)` performs a ground check:
+  `device(X) /\ ~hot(X) => on(X).`

@@ -113,7 +113,7 @@ parserSpec = describe "Parser" $ do
     parseCond "<test>" "X = Y" `shouldSatisfy` isRight
 
   it "parses programs" $ do
-    let prog = "hot(X) => off(X).\n~hot(X) => on(X).\n"
+    let prog = "device(heater).\ndevice(X) /\\ hot(X) => off(X).\ndevice(X) /\\ ~hot(X) => on(X).\n"
     parseProgram "<test>" prog `shouldSatisfy` isRight
 
   it "parses pattern functions" $ do
@@ -164,7 +164,7 @@ normalizerSpec = describe "Normalizer" $ do
     length appendRules `shouldSatisfy` (>= 1)
 
   it "produces only normal-form rules" $ do
-    np <- parseAndNormalize "hot(X) => off(X).\n~hot(X) => on(X).\n@on(X) /\\ hot(X) => warning(X).\n"
+    np <- parseAndNormalize "device(heater).\ndevice(X) /\\ hot(X) => off(X).\ndevice(X) /\\ ~hot(X) => on(X).\n@on(X) /\\ hot(X) => warning(X).\n"
     -- All rules should have NormalCond with proper structure
     let allNormal = all (\r -> all (\c -> ncPrevDepth c >= 0) (nrConditions r)) np
     allNormal `shouldBe` True
@@ -182,21 +182,23 @@ interpreterSpec = describe "Interpreter" $ do
     worldContains st "off(heater)" `shouldBe` True
 
   it "handles negation-as-failure" $ do
-    st <- runWithAssertions "~hot(X) => on(X)." [(0, ["hot(heater)"])] 1
+    st <- runWithAssertions "device(heater).\ndevice(X) /\\ ~hot(X) => on(X)." [(0, ["hot(heater)"])] 1
     -- hot(heater) is asserted, so ~hot(heater) fails, on(heater) not derived
     worldContains st "on(heater)" `shouldBe` False
 
   it "foot warmer example" $ do
-    let prog = "hot(X) => off(X).\n~hot(X) => on(X).\n"
+    let prog = "device(heater).\ndevice(X) /\\ hot(X) => off(X).\ndevice(X) /\\ ~hot(X) => on(X).\n"
     -- World 0 with hot(heater)
     st1 <- runWithAssertions prog [(0, ["hot(heater)"])] 1
     worldContains st1 "off(heater)" `shouldBe` True
     worldContains st1 "on(heater)" `shouldBe` False
-    -- World 1 without assertion: ~hot(X) has unbound X (negation-as-failure
-    -- with free variables doesn't bind them), so on(X) is not ground.
-    -- Neither on(heater) nor off(heater) will be derived.
+    worldContains st1 "device(heater)" `shouldBe` True
+    -- World 1 without assertion: device(X) binds X=heater, ~hot(heater)
+    -- succeeds (ground negation), so on(heater) is derived.
     let st2 = stepWorld st1
+    worldContains st2 "on(heater)" `shouldBe` True
     worldContains st2 "off(heater)" `shouldBe` False
+    worldContains st2 "device(heater)" `shouldBe` True
 
   it "foot warmer example with ground negation" $ do
     -- Use ground negation to avoid the free variable issue
