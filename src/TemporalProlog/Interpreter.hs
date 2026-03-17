@@ -14,7 +14,7 @@ import Control.Monad (guard)
 import Data.List (nub, partition)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, fromMaybe)
 import qualified Data.Set as Set
 import Data.Set (Set)
 
@@ -151,8 +151,8 @@ satisfyCond (NormalCond depth negated atom) history worldNum world =
         else []
     Just tw ->
       if negated
-        then satisfyNegated atom tw world
-        else satisfyPositive atom tw
+        then satisfyNegated atom tw world worldNum
+        else satisfyPositive atom tw worldNum
 
 -- | Look up a world at depth d in the past
 --   depth 0 = current world being constructed
@@ -167,21 +167,20 @@ lookupWorld d history _worldNum _ =
      else Nothing  -- before time began
 
 -- | Find substitutions for a positive atom against a world
-satisfyPositive :: Atom -> World -> [Subst]
-satisfyPositive pat world =
+satisfyPositive :: Atom -> World -> Int -> [Subst]
+satisfyPositive pat world worldNum =
   -- Check external predicates first
-  case evaluateExternal pat of
-    Just True  -> [emptySubst]
-    Just False -> []
-    Nothing    -> mapMaybe (matchAtom pat) (Set.toList world)
+  case evaluateExternal pat worldNum of
+    Just substs -> substs
+    Nothing     -> mapMaybe (matchAtom pat) (Set.toList world)
 
 -- | Find substitutions for a negated atom (negation-as-failure)
-satisfyNegated :: Atom -> World -> World -> [Subst]
-satisfyNegated atom targetWorld _currentWorld =
+satisfyNegated :: Atom -> World -> World -> Int -> [Subst]
+satisfyNegated atom targetWorld _currentWorld worldNum =
   -- For negation-as-failure: ~p(X) is true if there is no instance of p in the world
   -- If atom is ground, check if it's NOT in the world
   if isGroundAtom atom
-    then if atom `Set.notMember` targetWorld && evaluateExternal atom /= Just True
+    then if atom `Set.notMember` targetWorld && null (fromMaybe [] (evaluateExternal atom worldNum))
          then [emptySubst]
          else []
     else
@@ -189,20 +188,32 @@ satisfyNegated atom targetWorld _currentWorld =
       -- instances. This is tricky with free variables in negated conditions.
       -- For safety, we require negated atoms to be ground after substitution
       -- from positive conditions. If still non-ground, treat as failure.
-      if null (satisfyPositive atom targetWorld)
+      if null (satisfyPositive atom targetWorld worldNum)
         then [emptySubst]
         else []
 
 -- | Evaluate external/built-in predicates
-evaluateExternal :: Atom -> Maybe Bool
-evaluateExternal (Atom "true" []) = Just True
-evaluateExternal (Atom "false" []) = Just False
-evaluateExternal (Atom "=" [t1, t2]) = Just (t1 == t2)
-evaluateExternal (Atom ">" [t1, t2]) = compareTerm t1 t2 (>)
-evaluateExternal (Atom "<" [t1, t2]) = compareTerm t1 t2 (<)
-evaluateExternal (Atom ">=" [t1, t2]) = compareTerm t1 t2 (>=)
-evaluateExternal (Atom "<=" [t1, t2]) = compareTerm t1 t2 (<=)
-evaluateExternal _ = Nothing
+evaluateExternal :: Atom -> Int -> Maybe [Subst]
+evaluateExternal (Atom "true" []) _ = Just [emptySubst]
+evaluateExternal (Atom "false" []) _ = Just []
+evaluateExternal (Atom "=" [t1, t2]) _ =
+  case unifyTerm t1 t2 of
+    Just s  -> Just [s]
+    Nothing -> Just []
+evaluateExternal (Atom ">" [t1, t2]) _ = boolExternal $ compareTerm t1 t2 (>)
+evaluateExternal (Atom "<" [t1, t2]) _ = boolExternal $ compareTerm t1 t2 (<)
+evaluateExternal (Atom ">=" [t1, t2]) _ = boolExternal $ compareTerm t1 t2 (>=)
+evaluateExternal (Atom "<=" [t1, t2]) _ = boolExternal $ compareTerm t1 t2 (<=)
+evaluateExternal (Atom "at" [t]) worldNum = Just $ case t of
+  TVar v -> [Map.singleton v (TFun (show worldNum) [])]
+  TFun s [] | s == show worldNum -> [emptySubst]
+  _ -> []
+evaluateExternal _ _ = Nothing
+
+boolExternal :: Maybe Bool -> Maybe [Subst]
+boolExternal (Just True) = Just [emptySubst]
+boolExternal (Just False) = Just []
+boolExternal Nothing = Nothing
 
 -- | Try to compare terms as numbers
 compareTerm :: Term -> Term -> (Int -> Int -> Bool) -> Maybe Bool
