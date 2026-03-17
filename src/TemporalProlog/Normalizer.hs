@@ -1,3 +1,33 @@
+-- |
+-- Module      : TemporalProlog.Normalizer
+-- Description : Five-step normalization pipeline (paper §5.1, pp. 10–14)
+--
+-- Transforms user-level 'Rule's into 'NormalRule's suitable for the
+-- world-by-world interpreter. The pipeline has five steps, each
+-- eliminating a class of temporal operators by introducing auxiliary
+-- predicates:
+--
+-- 1. __Step 1__ (p. 10): Eliminate future-time result operators —
+--    'RAlways' (□), 'RUntil', 'RAtNext' — and split head/body
+--    conjunctions.
+--
+-- 2. __Step 2__ (pp. 10–11): Eliminate past-time condition operators —
+--    'CSince', 'CAfter', 'CFor', 'CHasBeen' (■), 'COnce' (◆).
+--
+-- 3. __Step 3__ (pp. 12–13): Expand pattern functions. First substep
+--    converts @f(args) -> body@ definitions to predicate facts; second
+--    substep replaces nested function calls in terms with fresh variables
+--    and auxiliary conditions.
+--
+-- 4. __Step 4__ (p. 13): Push negation to the atomic level so that every
+--    @~@ directly precedes an atom or @@^n(atom)@.
+--
+-- 5. __Step 5__ (p. 14): Distribute @\@@ over @/\\@ so each condition has
+--    the canonical form @@^m(~?)atom@.
+--
+-- Each step iterates until a termination condition is met (the relevant
+-- operator class is absent). The paper proves termination because each
+-- step strictly decreases the count of its target operators.
 module TemporalProlog.Normalizer
   ( normalize
   , step1
@@ -49,6 +79,7 @@ varsToTerms = map TVar
 -- Also split conjunctions in heads and bodies.
 -- ============================================================
 
+-- | Step 1: Eliminate □, until, atnext; split conjunctions (paper p. 10)
 step1 :: IORef Int -> [Rule] -> FreshM [Rule]
 step1 ref = go maxNormalizerIterations
   where
@@ -170,6 +201,7 @@ step1Rule ref rule = case rule of
 -- Step 2: Eliminate since, after, for, has-been (#), once (?)
 -- ============================================================
 
+-- | Step 2: Eliminate since, after, for, ■, ◆ (paper pp. 10–11)
 step2 :: IORef Int -> [Rule] -> FreshM [Rule]
 step2 ref = go maxNormalizerIterations
   where
@@ -381,6 +413,7 @@ nestCPrev n c = CPrev (nestCPrev (n-1) c)
 -- (Simplified: we convert pattern func defs into predicate rules)
 -- ============================================================
 
+-- | Step 3: Expand pattern functions (paper pp. 12–13)
 step3 :: IORef Int -> [PatternFunc] -> [Rule] -> FreshM [Rule]
 step3 _ [] rules = return rules
 step3 ref pfs rules = do
@@ -488,6 +521,7 @@ expandTerm _ _ _ t@(TVar _) = return (t, [], False)
 -- After this step, every negation is directly on an atomic formula.
 -- ============================================================
 
+-- | Step 4: Push negation to atomic level (paper p. 13)
 step4 :: IORef Int -> [Rule] -> FreshM [Rule]
 step4 ref = go maxNormalizerIterations
   where
@@ -540,6 +574,7 @@ step4Cond _ _ c = return (c, [])
 -- Step 5: Distribute @ over /\ so each condition is @^m(~?)atom
 -- ============================================================
 
+-- | Step 5: Distribute @ over /\\ (paper p. 14)
 step5 :: [Rule] -> [Rule]
 step5 = map step5Rule
 
@@ -587,6 +622,7 @@ toNormalCond = go 0 False
 -- Full normalization pipeline
 -- ============================================================
 
+-- | Full normalization pipeline: steps 1–5 then conversion to 'NormalRule'
 normalize :: Program -> IO NormalProgram
 normalize (Program rules pfs) = do
   ref <- newIORef 0

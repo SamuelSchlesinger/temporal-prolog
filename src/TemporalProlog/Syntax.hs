@@ -1,3 +1,23 @@
+-- |
+-- Module      : TemporalProlog.Syntax
+-- Description : Abstract syntax tree for Temporal Prolog
+--
+-- Defines the core AST types for the temporal logic programming language
+-- based on Sakuragawa (1986), \"Temporal Prolog\".
+--
+-- The AST has two levels:
+--
+-- * __User-facing types__: 'Term', 'Atom', 'Cond', 'Result', 'Rule', and
+--   'PatternFunc' represent the full surface syntax including temporal
+--   operators (always, until, since, etc.).
+--
+-- * __Normalized types__: 'NormalCond' and 'NormalRule' represent the
+--   restricted normal form where every condition is @\@^m(~?)atom@ and
+--   every rule head is a plain atom. See "TemporalProlog.Normalizer".
+--
+-- 'TPrev' in terms represents the @\@@ operator applied to a value
+-- (\"value at previous time\"), while 'CPrev' in conditions represents
+-- @\@@ applied to a formula (\"formula held at previous time\").
 module TemporalProlog.Syntax where
 
 import Data.Map.Strict (Map)
