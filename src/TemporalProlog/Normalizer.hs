@@ -7,8 +7,11 @@ module TemporalProlog.Normalizer
   , step5
   ) where
 
+import Control.Monad (unless)
 import Data.IORef
 import qualified Data.Set as Set
+import System.IO (hPutStrLn, stderr)
+import TemporalProlog.PrettyPrint (ppNormalRule)
 import TemporalProlog.Syntax
 
 -- | Fresh name generation
@@ -417,6 +420,22 @@ normalize (Program rules pfs) = do
   -- Convert to normal form
   let normals = map toNormalRule r5
   case sequence normals of
-    Just ns -> return ns
+    Just ns -> do
+      validateSafety ns
+      return ns
     Nothing -> fail $ "Normalization produced non-normal rules:\n" ++
                       unlines [show r | r <- r5]
+
+-- | Validate that every variable in a negated condition (at depth 0)
+-- is bound by at least one positive condition in the same rule.
+validateSafety :: NormalProgram -> IO ()
+validateSafety = mapM_ checkRule
+  where
+    checkRule rule = do
+      let posVars = Set.unions [fvAtom (ncAtom c) | c <- nrConditions rule, not (ncNegated c)]
+          negVars = Set.unions [fvAtom (ncAtom c) | c <- nrConditions rule, ncNegated c, ncPrevDepth c == 0]
+          unsafeVars = negVars `Set.difference` posVars
+      unless (Set.null unsafeVars) $
+        hPutStrLn stderr $ "Warning: unsafe rule - variables " ++ show (Set.toList unsafeVars) ++
+                          " in negated conditions not bound by positive conditions: " ++
+                          ppNormalRule rule
