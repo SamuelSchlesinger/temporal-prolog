@@ -1,6 +1,6 @@
 module Main where
 
-import Control.Exception (try, IOException)
+import Control.Exception (try, evaluate, IOException, SomeException)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad (when)
 import Data.List (isPrefixOf)
@@ -67,10 +67,16 @@ processInput input st
       liftIO (loadFile fp st)
   | ":step" `isPrefixOf` input = do
       let rest = dropWhile (== ' ') (drop 5 input)
+          doStep n = do
+            let stepped = stepWorldN n (rsInterp st)
+            result <- liftIO $ try (evaluate (forceWorlds stepped)) :: InputT IO (Either SomeException InterpreterState)
+            case result of
+              Left err -> do outputStrLn $ "Error: " ++ show err; return st
+              Right st' -> return $ st { rsInterp = st' }
       case rest of
-        [] -> return $ st { rsInterp = stepWorldN 1 (rsInterp st) }
+        [] -> doStep 1
         _  -> case readMaybe rest :: Maybe Int of
-          Just n | n > 0 -> return $ st { rsInterp = stepWorldN n (rsInterp st) }
+          Just n | n > 0 -> doStep n
           Just _ -> do outputStrLn "Step count must be a positive integer."; return st
           Nothing -> do outputStrLn $ "Invalid step count: " ++ rest; return st
   | ":assert " `isPrefixOf` input = do
@@ -130,6 +136,36 @@ processInput input st
         , rsProgram  = Program [] []
         , rsNormProg = []
         }
+  | ":trace" `isPrefixOf` input = do
+      let traces = traceDerivations (rsInterp st)
+      if null traces
+        then outputStrLn "No derivations to trace. Use :step to advance."
+        else do
+          outputStrLn $ "Derivations for world " ++ show (getWorldNumber (rsInterp st)) ++ ":"
+          let userTraces = filter (\(a, _) -> not (isInternalAtom a)) traces
+          mapM_ (\(fact, rule) ->
+            outputStrLn $ "  " ++ ppAtom fact ++ "  <--  " ++ ppNormalRule rule
+            ) userTraces
+      return st
+  | ":examples" `isPrefixOf` input = do
+      outputStrLn "Example programs you can try:\n"
+      outputStrLn "  % Simple fact derivation"
+      outputStrLn "  hot(heater) => off(heater)."
+      outputStrLn "  ~hot(heater) => on(heater)."
+      outputStrLn ""
+      outputStrLn "  % Temporal: previous world"
+      outputStrLn "  @on(X) /\\ hot(X) => warning(X)."
+      outputStrLn ""
+      outputStrLn "  % Future: next step"
+      outputStrLn "  request(X) => next process(X)."
+      outputStrLn ""
+      outputStrLn "  % Load example files with :load examples/<name>.tpl"
+      return st
+  | ":save " `isPrefixOf` input = do
+      let fp = dropWhile (== ' ') (drop 6 input)
+      liftIO $ writeFile fp (ppProgram (rsProgram st))
+      outputStrLn $ "Saved program to " ++ fp
+      return st
   | ":" `isPrefixOf` input = do
       outputStrLn $ "Unknown command: " ++ input
       outputStrLn "Type :help for available commands."
@@ -195,6 +231,9 @@ showHelp = do
   outputStrLn "  :world          Show the current world"
   outputStrLn "  :history        Show all past worlds"
   outputStrLn "  :program        Show the loaded program"
+  outputStrLn "  :trace          Show which rules derived each fact"
+  outputStrLn "  :save <file>    Save the current program to a file"
+  outputStrLn "  :examples       Show example programs"
   outputStrLn "  :reset          Reset the interpreter"
   outputStrLn "  :help           Show this help"
   outputStrLn "  :quit           Exit"
@@ -216,3 +255,10 @@ showSubst s
   | null pairs = "{}"
   | otherwise  = unwords [v ++ " = " ++ ppTerm t | (v, t) <- pairs]
   where pairs = Map.toList s
+
+-- | Force evaluation of the worlds in an InterpreterState so that
+-- errors (e.g. from stratification) are caught by 'evaluate'.
+forceWorlds :: InterpreterState -> InterpreterState
+forceWorlds st = case isWorlds st of
+  []    -> st
+  (w:_) -> w `seq` Set.size w `seq` st

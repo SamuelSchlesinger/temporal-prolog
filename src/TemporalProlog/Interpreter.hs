@@ -32,6 +32,7 @@ module TemporalProlog.Interpreter
   , currentWorld
   , getHistory
   , getWorldNumber
+  , traceDerivations
   ) where
 
 import Control.Monad (guard)
@@ -308,3 +309,19 @@ updateStratum deps current name_ currentStratum =
           posNeeded = [Map.findWithDefault 0 dep current
                       | (dep, Positive) <- depList]
       in maximum (currentStratum : negNeeded ++ posNeeded)
+
+-- ============================================================
+-- Tracing
+-- ============================================================
+
+-- | For each derived fact in the current world, find which rules could derive it
+traceDerivations :: InterpreterState -> [(GroundAtom, NormalRule)]
+traceDerivations st = case isWorlds st of
+  [] -> []
+  (w:history) ->
+    let worldNum = isWorldNum st
+        prog = isProgram st
+    in concatMap (\rule ->
+         let derived = deriveFromRule rule history worldNum w
+         in map (\a -> (a, rule)) derived
+       ) prog

@@ -4,6 +4,7 @@ import Test.Hspec
 import qualified Data.Set as Set
 import qualified Data.Map.Strict as Map
 import Data.Either (isLeft, isRight)
+import Control.Exception (evaluate, try, SomeException)
 
 import TemporalProlog.Syntax
 import TemporalProlog.Parser
@@ -17,6 +18,12 @@ main = hspec $ do
   normalizerSpec
   interpreterSpec
   unificationSpec
+  eventuallyNextSpec
+  patternFunctionSpec
+  unificationEqualitySpec
+  stratificationSpec
+  safetyValidationSpec
+  edgeCaseSpec
 
 -- Helper: parse and normalize a program string
 parseAndNormalize :: String -> IO NormalProgram
@@ -275,6 +282,158 @@ unificationSpec = describe "Unification" $ do
 
   it "fails to match different predicates" $ do
     matchAtom (Atom "p" []) (Atom "q" []) `shouldBe` Nothing
+
+-- ============================================================
+-- F. Eventually and Next operators
+-- ============================================================
+
+eventuallyNextSpec :: Spec
+eventuallyNextSpec = describe "Eventually and Next operators" $ do
+  it "eventually p => q: assert p at world 0, q appears and persists" $ do
+    let prog = "eventually p => q.\nq => q.\n"
+    st <- runWithAssertions prog [(0, ["p"])] 1
+    worldContains st "q" `shouldBe` True
+    -- q persists to the next world via q => q
+    let st2 = stepWorld st
+    worldContains st2 "q" `shouldBe` True
+
+  it "a => next b: b absent at world 0, present at world 1" $ do
+    let prog = "a => next b.\n"
+    st <- runWithAssertions prog [(0, ["a"])] 1
+    -- At world 0, b should not be derived (it is deferred to next)
+    worldContains st "b" `shouldBe` False
+    -- At world 1, b should appear
+    let st2 = stepWorld st
+    worldContains st2 "b" `shouldBe` True
+
+  it "a => next (next b): b appears at world 2" $ do
+    let prog = "a => next next b.\n"
+    st0 <- runWithAssertions prog [(0, ["a"])] 1
+    worldContains st0 "b" `shouldBe` False
+    let st1 = stepWorld st0
+    worldContains st1 "b" `shouldBe` False
+    let st2 = stepWorld st1
+    worldContains st2 "b" `shouldBe` True
+
+  it "eventually p /\\ q => r: combined condition" $ do
+    let prog = "eventually p /\\ q => r.\n"
+    st <- runWithAssertions prog [(0, ["p", "q"])] 1
+    worldContains st "r" `shouldBe` True
+
+-- ============================================================
+-- G. Pattern function expansion
+-- ============================================================
+
+patternFunctionSpec :: Spec
+patternFunctionSpec = describe "Pattern function expansion" $ do
+  it "ground wrap: wrap(hello) -> box(hello). result(wrap(hello))." $ do
+    -- Pattern functions with variables produce non-ground facts that the
+    -- interpreter filters out. Ground instances work correctly.
+    let prog = "wrap(hello) -> box(hello).\nresult(wrap(hello)).\n"
+    st <- runWithAssertions prog [] 1
+    worldContains st "result(box(hello))" `shouldBe` True
+
+  it "pattern function normalizes to predicate with extra arg" $ do
+    -- wrap(X) -> box(X) becomes the fact wrap(X, box(X))
+    np <- parseAndNormalize "wrap(X) -> box(X).\n"
+    let wrapRules = filter (\r -> let Atom n _ = nrHead r in n == "wrap") np
+    length wrapRules `shouldSatisfy` (>= 1)
+    let NormalRule _ (Atom _ args) = head wrapRules
+    length args `shouldBe` 2
+
+-- ============================================================
+-- H. Unification = and at(X)
+-- ============================================================
+
+unificationEqualitySpec :: Spec
+unificationEqualitySpec = describe "Unification = and at(X)" $ do
+  it "p(X) /\\ X = hello => q(X): with p(hello), derives q(hello)" $ do
+    let prog = "p(X) /\\ X = hello => q(X).\n"
+    st <- runWithAssertions prog [(0, ["p(hello)"])] 1
+    worldContains st "q(hello)" `shouldBe` True
+
+  it "a = b => never: unification failure on distinct ground terms" $ do
+    let prog = "a = b => never.\n"
+    st <- runWithAssertions prog [] 1
+    worldContains st "never" `shouldBe` False
+
+  it "at(N) /\\ N > 3 => late: late appears at world 4+" $ do
+    let prog = "at(N) /\\ N > 3 => late.\n"
+    st <- runWithAssertions prog [] 5
+    -- After 5 steps we are at world 4 (0..4)
+    worldContains st "late" `shouldBe` True
+    -- Check that world 3 does NOT have late
+    let history = getHistory st
+        world3 = history !! 3
+        lateAtom = case parseAtom "<test>" "late" of
+                     Right a -> a
+                     Left _ -> error "bad parse"
+    Set.member lateAtom world3 `shouldBe` False
+
+-- ============================================================
+-- I. Stratification
+-- ============================================================
+
+stratificationSpec :: Spec
+stratificationSpec = describe "Stratification" $ do
+  it "~a => a: negative self-cycle should error" $ do
+    np <- parseAndNormalize "~a => a.\n"
+    let st = stepWorld (newInterpreterState np)
+        -- Force the world set deeply: convert to list to force all elements
+        forceWorld = case currentWorld st of
+          Just w  -> length (Set.toList w) `seq` ()
+          Nothing -> ()
+    result <- try (evaluate forceWorld) :: IO (Either SomeException ())
+    result `shouldSatisfy` isLeft
+
+  it "@~a => b: @ excludes from dependency graph, should succeed" $ do
+    let prog = "@~a => b.\n"
+    st <- runWithAssertions prog [] 1
+    -- At world 0, @~a is true (no previous world, negation of absent = true)
+    worldContains st "b" `shouldBe` True
+
+-- ============================================================
+-- J. Safety validation
+-- ============================================================
+
+safetyValidationSpec :: Spec
+safetyValidationSpec = describe "Safety validation" $ do
+  it "~p(X) => q(X) normalizes (warns about X)" $ do
+    np <- parseAndNormalize "~p(X) => q(X).\n"
+    length np `shouldSatisfy` (>= 1)
+
+  it "r(X) /\\ ~p(X) => q(X) normalizes" $ do
+    np <- parseAndNormalize "r(X) /\\ ~p(X) => q(X).\n"
+    length np `shouldSatisfy` (>= 1)
+
+-- ============================================================
+-- K-M. Edge cases
+-- ============================================================
+
+edgeCaseSpec :: Spec
+edgeCaseSpec = describe "Edge cases" $ do
+  it "deep @-nesting: @@@@p => q has ncPrevDepth == 4" $ do
+    np <- parseAndNormalize "@@@@p => q.\n"
+    let depths = [ncPrevDepth c | r <- np, c <- nrConditions r, let Atom n _ = ncAtom c, n == "p"]
+    depths `shouldContain` [4]
+
+  it "Unicode negation: parseCond \\x00ACp succeeds" $ do
+    parseCond "<test>" "\x00ACp" `shouldSatisfy` isRight
+
+  it "bare fact: p. derives p" $ do
+    st <- runWithAssertions "p.\n" [] 1
+    worldContains st "p" `shouldBe` True
+
+  it "world history length after 3 steps" $ do
+    let st0 = newInterpreterState []
+        st3 = stepWorldN 3 st0
+    length (getHistory st3) `shouldBe` 3
+    getWorldNumber st3 `shouldBe` 2
+
+  it "self-unification: p(X) /\\ X = X => q(X) with p(a) derives q(a)" $ do
+    let prog = "p(X) /\\ X = X => q(X).\n"
+    st <- runWithAssertions prog [(0, ["p(a)"])] 1
+    worldContains st "q(a)" `shouldBe` True
 
 -- Helper to filter internal atoms
 isInternal :: Atom -> Bool

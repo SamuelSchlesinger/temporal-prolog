@@ -1,10 +1,22 @@
 cabal-version:   3.14
 name:            temporal-prolog
 version:         0.1.0.0
-license:         NONE
+license:         MIT
+license-file:    LICENSE
+synopsis:        A temporal logic programming language based on Sakuragawa (1986)
+description:
+    Temporal Prolog extends standard Prolog with temporal operators from
+    linear temporal logic, computing a sequence of worlds (sets of ground
+    atoms) over discrete time steps. Conditions may reference past worlds
+    via operators like @\@@ (previous), @#@ (has-been), and @?@ (once),
+    while results may project into the future with @always@, @until@,
+    @atnext@, and @next@. Includes a five-step normalization pipeline and
+    a stratified least-fixed-point interpreter with negation-as-failure.
+category:        Language
 author:          Samuel Schlesinger
 maintainer:      sgschlesinger@gmail.com
 build-type:      Simple
+tested-with:     GHC == 9.6.7
 extra-doc-files: CHANGELOG.md
 
 common warnings
