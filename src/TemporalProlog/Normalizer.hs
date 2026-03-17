@@ -20,6 +20,10 @@ freshName ref prefix = do
   writeIORef ref (n + 1)
   return (prefix ++ "_aux" ++ show n)
 
+-- | Maximum iterations for normalizer fixed-point loops
+maxNormalizerIterations :: Int
+maxNormalizerIterations = 1000
+
 -- | Flatten a rule with conjunction in the body into a list of conditions
 flattenConds :: Cond -> [Cond]
 flattenConds (CAnd cs) = concatMap flattenConds cs
@@ -42,12 +46,15 @@ varsToTerms = map TVar
 -- ============================================================
 
 step1 :: IORef Int -> [Rule] -> FreshM [Rule]
-step1 ref rules = do
-  rs <- mapM (step1Rule ref) rules
-  let rs' = concat rs
-  if any needsStep1 rs'
-    then step1 ref rs'
-    else return rs'
+step1 ref = go maxNormalizerIterations
+  where
+    go 0 _ = fail "Normalizer step 1 (eliminate always/until/atnext) did not converge within iteration limit"
+    go fuel rules = do
+      rs <- mapM (step1Rule ref) rules
+      let rs' = concat rs
+      if any needsStep1 rs'
+        then go (fuel - 1) rs'
+        else return rs'
 
 needsStep1 :: Rule -> Bool
 needsStep1 (Fact r) = needsStep1Result r
@@ -139,12 +146,15 @@ step1Rule ref rule = case rule of
 -- ============================================================
 
 step2 :: IORef Int -> [Rule] -> FreshM [Rule]
-step2 ref rules = do
-  rs <- mapM (step2Rule ref) rules
-  let rs' = concat rs
-  if any needsStep2 rs'
-    then step2 ref rs'
-    else return rs'
+step2 ref = go maxNormalizerIterations
+  where
+    go 0 _ = fail "Normalizer step 2 (eliminate since/after/for/has-been/once) did not converge within iteration limit"
+    go fuel rules = do
+      rs <- mapM (step2Rule ref) rules
+      let rs' = concat rs
+      if any needsStep2 rs'
+        then go (fuel - 1) rs'
+        else return rs'
 
 needsStep2 :: Rule -> Bool
 needsStep2 (Fact _) = False  -- facts at this point should be atoms
@@ -306,12 +316,15 @@ expandRule _ rule = rule  -- For now, pass through. Full expansion would require
 -- ============================================================
 
 step4 :: IORef Int -> [Rule] -> FreshM [Rule]
-step4 ref rules = do
-  rs <- mapM (step4Rule ref) rules
-  let rs' = concat rs
-  if any needsStep4 rs'
-    then step4 ref rs'
-    else return rs'
+step4 ref = go maxNormalizerIterations
+  where
+    go 0 _ = fail "Normalizer step 4 (push negation to atoms) did not converge within iteration limit"
+    go fuel rules = do
+      rs <- mapM (step4Rule ref) rules
+      let rs' = concat rs
+      if any needsStep4 rs'
+        then go (fuel - 1) rs'
+        else return rs'
 
 needsStep4 :: Rule -> Bool
 needsStep4 (Fact _) = False
