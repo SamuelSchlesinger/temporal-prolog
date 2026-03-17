@@ -40,6 +40,7 @@ ppCond (COnce c)    = "?" ++ ppCondAtom c
 ppCond (CSince c d) = ppCondAtom c ++ " since " ++ ppCondAtom d
 ppCond (CAfter c d) = ppCondAtom c ++ " after " ++ ppCondAtom d
 ppCond (CFor c n)   = ppCondAtom c ++ " for " ++ show n
+ppCond (CEventually c) = "eventually " ++ ppCondAtom c
 ppCond (CAnd cs)    = intercalate " /\\ " (map ppCondAtom cs)
 
 ppCondAtom :: Cond -> String
@@ -53,6 +54,7 @@ ppResult (RAtom a)     = ppAtom a
 ppResult (RAlways r)   = "always " ++ ppResultAtom r
 ppResult (RUntil r c)  = ppResultAtom r ++ " until " ++ ppCondAtom c
 ppResult (RAtNext r c) = ppResultAtom r ++ " atnext " ++ ppCondAtom c
+ppResult (RNext r)     = "next " ++ ppResultAtom r
 ppResult (RAnd rs)     = intercalate " /\\ " (map ppResultAtom rs)
 
 ppResultAtom :: Result -> String

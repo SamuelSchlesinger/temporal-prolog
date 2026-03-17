@@ -69,6 +69,7 @@ needsStep1Result (RAlways _)    = True
 needsStep1Result (RUntil _ _)   = True
 needsStep1Result (RAtNext _ _)  = True
 needsStep1Result (RAnd _)       = True
+needsStep1Result (RNext _)      = True
 needsStep1Result _              = False
 
 hasNestedAnd :: Cond -> Bool
@@ -142,6 +143,26 @@ step1Rule ref rule = case rule of
            , Rule [CAtom pAtom, b] q
            ]
 
+  -- next q  ->  p(Xs).  @p(Xs) => q.
+  Fact (RNext q) -> do
+    let vs = resultVars q
+        vterms = varsToTerms vs
+    p <- freshName ref "next"
+    let pAtom = Atom p vterms
+    return [ Fact (RAtom pAtom)
+           , Rule [CPrev (CAtom pAtom)] q
+           ]
+
+  -- a => next q  ->  a => p(Xs).  @p(Xs) => q.
+  Rule cs (RNext q) -> do
+    let vs = resultVars q
+        vterms = varsToTerms vs
+    p <- freshName ref "next"
+    let pAtom = Atom p vterms
+    return [ Rule cs (RAtom pAtom)
+           , Rule [CPrev (CAtom pAtom)] q
+           ]
+
   -- Base case: no transformation needed
   _ -> return [rule]
 
@@ -170,6 +191,7 @@ hasStep2Op (COnce _)     = True
 hasStep2Op (CSince _ _)  = True
 hasStep2Op (CAfter _ _)  = True
 hasStep2Op (CFor _ _)    = True
+hasStep2Op (CEventually _) = True
 hasStep2Op (CNeg c)      = hasStep2Op c
 hasStep2Op (CPrev c)     = hasStep2Op c
 hasStep2Op (CAnd cs)     = any hasStep2Op cs
@@ -245,6 +267,9 @@ transformStep2 ref cond r otherConds = case cond of
            , Rule [a] (RAtom pAtom)
            , Rule [CPrev (CAtom pAtom), CNeg b] (RAtom pAtom)
            ]
+
+  -- eventually is a synonym for once
+  CEventually a -> transformStep2 ref (COnce a) r otherConds
 
   -- (5) ...a for n... => r -> ...(a /\ @a /\ @@a /\ ... /\ @^(n-1)a)... => r
   CFor a n -> do
