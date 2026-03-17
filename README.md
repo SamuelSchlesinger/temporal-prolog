@@ -264,13 +264,18 @@ Supporting modules:
 - `TemporalProlog.Unification`: First-order term unification
 - `TemporalProlog.PrettyPrint`: Human-readable display for all AST types
 
-## Known limitations
+## Notes on negation
 
-- **Negation with free variables**: Negation-as-failure (`~p(X)`) does not bind
-  variables — it only checks whether matching facts exist. Variables in negated
-  conditions must be bound by a preceding positive condition. The safety
-  validator warns when this is violated. This follows standard Prolog semantics
-  for safe negation.
+Negation in Temporal Prolog is **negation-as-failure** under the closed-world
+assumption, following standard Prolog semantics. `~p(X)` checks whether any
+matching `p(...)` exists — it does not enumerate values of X for which `p(X)` is
+false. Variables in negated conditions must be bound by a preceding positive
+condition:
+
+```prolog
+r(X) /\ ~p(X) => q(X).    % correct: X is bound by r(X) first
+~p(X) => q(X).             % X is unbound — the safety validator warns
+```
 
 ## References
 
