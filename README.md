@@ -266,10 +266,6 @@ Supporting modules:
 
 ## Known limitations
 
-- **Mixed TPrev depths**: When terms within a single atom have different `@`
-  depths (e.g., `p(@X, @@Y)`), the normalizer raises an error rather than
-  introducing auxiliary predicates to handle the mixed case.
-
 - **Negation with free variables**: Negation-as-failure (`~p(X)`) does not bind
   variables — it only checks whether matching facts exist. Variables in negated
   conditions must be bound by a preceding positive condition. The safety
