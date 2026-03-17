@@ -28,6 +28,19 @@ library
     hs-source-dirs:   src
     default-language: Haskell2010
 
+test-suite temporal-prolog-test
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          Main.hs
+    build-depends:
+        base ^>=4.18.3.0,
+        temporal-prolog,
+        containers,
+        hspec,
+        megaparsec
+    hs-source-dirs:   test
+    default-language: Haskell2010
+
 executable temporal-prolog
     import:           warnings
     main-is:          Main.hs
