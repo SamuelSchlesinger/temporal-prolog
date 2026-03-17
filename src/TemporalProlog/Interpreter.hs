@@ -50,7 +50,7 @@ import TemporalProlog.Unification
 data InterpreterState = InterpreterState
   { isProgram    :: NormalProgram
   , isWorlds     :: [World]      -- worlds in reverse order: head is most recent
-  , isWorldNum   :: Int          -- current world number
+  , isWorldNum   :: Maybe Int    -- current world number (Nothing before first step)
   , isAssertions :: [GroundAtom] -- facts asserted for the next step
   } deriving (Show)
 
@@ -58,7 +58,7 @@ newInterpreterState :: NormalProgram -> InterpreterState
 newInterpreterState prog = InterpreterState
   { isProgram    = prog
   , isWorlds     = []
-  , isWorldNum   = -1  -- will become 0 on first step
+  , isWorldNum   = Nothing
   , isAssertions = []
   }
 
@@ -70,7 +70,7 @@ currentWorld st = case isWorlds st of
 getHistory :: InterpreterState -> [World]
 getHistory = reverse . isWorlds
 
-getWorldNumber :: InterpreterState -> Int
+getWorldNumber :: InterpreterState -> Maybe Int
 getWorldNumber = isWorldNum
 
 -- | Assert a ground atom for the next world computation
@@ -86,14 +86,16 @@ queryAtom pat st = case currentWorld st of
 -- | Advance the interpreter by one world
 stepWorld :: InterpreterState -> InterpreterState
 stepWorld st =
-  let worldNum = isWorldNum st + 1
+  let worldNum = case isWorldNum st of
+        Nothing -> 0
+        Just n  -> n + 1
       history = isWorlds st  -- reverse order, head = most recent (world n-1)
       assertions = Set.fromList (isAssertions st)
       prog = isProgram st
       -- Compute the new world via least fixed point
       newWorld = computeWorld prog history assertions worldNum
   in st { isWorlds     = newWorld : history
-        , isWorldNum   = worldNum
+        , isWorldNum   = Just worldNum
         , isAssertions = []
         }
 
@@ -317,11 +319,11 @@ updateStratum deps current name_ currentStratum =
 
 -- | For each derived fact in the current world, find which rules could derive it
 traceDerivations :: InterpreterState -> [(GroundAtom, NormalRule)]
-traceDerivations st = case isWorlds st of
-  [] -> []
-  (w:history) ->
-    let worldNum = isWorldNum st
-        prog = isProgram st
+traceDerivations st = case (isWorlds st, isWorldNum st) of
+  ([], _) -> []
+  (_, Nothing) -> []
+  (w:history, Just worldNum) ->
+    let prog = isProgram st
     in concatMap (\rule ->
          let derived = deriveFromRule rule history worldNum w
          in map (\a -> (a, rule)) derived

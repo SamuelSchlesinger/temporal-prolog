@@ -43,13 +43,13 @@ You will see a prompt like:
 ```
 Temporal Prolog — based on Sakuragawa 1986
 Type :help for available commands.
-0>
+>
 ```
 
 ### Load an example
 
 ```
-0> :load examples/foot_warmer.tpl
+> :load examples/foot_warmer.tpl
 Loaded 2 rules and 0 pattern functions from examples/foot_warmer.tpl
 ```
 
@@ -58,23 +58,24 @@ Loaded 2 rules and 0 pattern functions from examples/foot_warmer.tpl
 Assert some facts and advance time:
 
 ```
-0> :assert hot(room1)
-0> :step
+> :assert hot(room1)
+> :step
 0> :world
 World 0:
+  hot(room1)
   off(room1)
 ```
 
-Assert different facts for the next step:
+Step again without asserting anything:
 
 ```
 0> :step
-1> :assert hot(room1)
-1> :step
 1> :world
 World 1:
-  off(room1)
 ```
+
+World 1 is empty because no facts were asserted, and the rule `~hot(X) => on(X)`
+cannot produce ground results when `X` is unbound (see [Notes on negation](#notes-on-negation)).
 
 Use `:history` to see all worlds at once.
 
@@ -162,7 +163,7 @@ hot(X) => off(X).  % inline comment
 You can also type a rule directly at the prompt to add it to the program:
 
 ```
-0> hot(X) => off(X).
+> hot(X) => off(X).
 Added: hot(X) => off(X).
 ```
 
@@ -182,25 +183,24 @@ hot(X) => off(X).
 REPL session:
 
 ```
-0> :load examples/foot_warmer.tpl
+> :load examples/foot_warmer.tpl
 Loaded 2 rules and 0 pattern functions from examples/foot_warmer.tpl
-0> :step
+> :assert hot(room1)
+> :step
 0> :world
 World 0:
-  on(X)
-0> :assert hot(room1)
+  hot(room1)
+  off(room1)
 0> :step
 1> :world
 World 1:
-  off(room1)
-0> :step
-2> :world
-World 2:
-  on(X)
 ```
 
-When `hot(room1)` is asserted, the controller derives `off(room1)`. When
-nothing is hot, the negation-as-failure rule `~hot(X) => on(X)` fires.
+When `hot(room1)` is asserted, the controller derives `off(room1)` (the
+asserted fact also appears in the world). World 1 is empty because no facts
+were asserted, and `~hot(X) => on(X)` with an unbound `X` succeeds at
+negation but produces the non-ground atom `on(X)`, which is filtered out.
+Using ground rules like `~hot(heater) => on(heater)` would work as expected.
 
 ### Mutual exclusion
 
@@ -218,11 +218,11 @@ assigned_to(X) => assigned_to_something.
 REPL session:
 
 ```
-0> :load examples/mutual_exclusion.tpl
+> :load examples/mutual_exclusion.tpl
 Loaded 4 rules and 0 pattern functions from examples/mutual_exclusion.tpl
-0> :assert assign(1)
-0> :assert assign(2)
-0> :step
+> :assert assign(1)
+> :assert assign(2)
+> :step
 0> :world
 World 0:
   assign(1)

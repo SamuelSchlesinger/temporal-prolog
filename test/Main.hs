@@ -448,7 +448,7 @@ edgeCaseSpec = describe "Edge cases" $ do
     let st0 = newInterpreterState []
         st3 = stepWorldN 3 st0
     length (getHistory st3) `shouldBe` 3
-    getWorldNumber st3 `shouldBe` 2
+    getWorldNumber st3 `shouldBe` Just 2
 
   it "self-unification: p(X) /\\ X = X => q(X) with p(a) derives q(a)" $ do
     let prog = "p(X) /\\ X = X => q(X).\n"

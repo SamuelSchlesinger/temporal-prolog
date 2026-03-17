@@ -4,6 +4,7 @@ import Control.Exception (try, evaluate, IOException, SomeException)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad (when)
 import Data.List (isPrefixOf)
+import Data.Maybe (isJust)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import System.Console.Haskeline
@@ -36,8 +37,9 @@ main = do
 
 loop :: REPLState -> InputT IO ()
 loop st = do
-  let wn = getWorldNumber (rsInterp st)
-      prompt = show (max 0 wn) ++ "> "
+  let prompt = case getWorldNumber (rsInterp st) of
+        Nothing -> "> "
+        Just n  -> show n ++ "> "
   minput <- getInputLine prompt
   case minput of
     Nothing -> outputStrLn "Goodbye."
@@ -110,7 +112,9 @@ processInput input st
         Nothing -> outputStrLn "No world computed yet. Use :step to advance."
         Just w -> do
           let userFacts = filter (not . isInternalAtom) (Set.toList w)
-          outputStrLn $ "World " ++ show (getWorldNumber (rsInterp st)) ++ ":"
+          case getWorldNumber (rsInterp st) of
+            Nothing -> outputStrLn "World:"
+            Just n  -> outputStrLn $ "World " ++ show n ++ ":"
           mapM_ (outputStrLn . ("  " ++) . ppAtom) userFacts
       return st
   | ":history" `isPrefixOf` input = do
@@ -141,7 +145,10 @@ processInput input st
       if null traces
         then outputStrLn "No derivations to trace. Use :step to advance."
         else do
-          outputStrLn $ "Derivations for world " ++ show (getWorldNumber (rsInterp st)) ++ ":"
+          let wnStr = case getWorldNumber (rsInterp st) of
+                Nothing -> "?"
+                Just n  -> show n
+          outputStrLn $ "Derivations for world " ++ wnStr ++ ":"
           let userTraces = filter (\(a, _) -> not (isInternalAtom a)) traces
           mapM_ (\(fact, rule) ->
             outputStrLn $ "  " ++ ppAtom fact ++ "  <--  " ++ ppNormalRule rule
@@ -188,7 +195,7 @@ processInput input st
               let oldInterp = rsInterp st
                   interp' = oldInterp { isProgram = normProg }
               outputStrLn $ "Added: " ++ ppRule rule
-              when (isWorldNum oldInterp >= 0) $
+              when (isJust (isWorldNum oldInterp)) $
                 outputStrLn "Warning: past worlds were computed under the old program."
               return $ st { rsProgram  = prog'
                           , rsNormProg = normProg
