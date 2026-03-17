@@ -2,6 +2,7 @@ module Main where
 
 import Control.Exception (try, IOException)
 import Control.Monad.IO.Class (liftIO)
+import Control.Monad (when)
 import Data.List (isPrefixOf)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -148,8 +149,11 @@ processInput input st
               outputStrLn $ "Normalization error: " ++ show err
               return st
             Right normProg -> do
-              let interp' = newInterpreterState normProg
+              let oldInterp = rsInterp st
+                  interp' = oldInterp { isProgram = normProg }
               outputStrLn $ "Added: " ++ ppRule rule
+              when (isWorldNum oldInterp >= 0) $
+                outputStrLn "Warning: past worlds were computed under the old program."
               return $ st { rsProgram  = prog'
                           , rsNormProg = normProg
                           , rsInterp   = interp'
