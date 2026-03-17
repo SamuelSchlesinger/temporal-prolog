@@ -1,3 +1,11 @@
+-- |
+-- Module      : TemporalProlog.PrettyPrint
+-- Description : Human-readable display for all AST types
+--
+-- Pretty-prints terms, atoms, conditions, results, rules, and their
+-- normalized counterparts. Uses ASCII operator syntax. Handles special
+-- display for lists (@[H|T]@, @[a, b, c]@), infix operators (@X > 5@),
+-- and the @\@@ prefix.
 module TemporalProlog.PrettyPrint where
 
 import Data.List (intercalate)

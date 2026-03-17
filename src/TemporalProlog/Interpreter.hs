@@ -1,3 +1,27 @@
+-- |
+-- Module      : TemporalProlog.Interpreter
+-- Description : World-by-world fixed-point execution engine (paper §5.2)
+--
+-- Executes a normalized Temporal Prolog program by computing a sequence
+-- of worlds (sets of ground atoms). Each world is the least fixed point
+-- of the program's rules applied to:
+--
+-- * Externally asserted facts for that time step
+-- * Built-in facts ('at', 'true')
+-- * Atoms derivable from rules referencing the current and past worlds
+--
+-- __Stratified negation.__ Negation-as-failure requires that rules be
+-- stratified: predicates involved in negative dependency cycles are
+-- rejected. The dependency graph intentionally excludes conditions with
+-- @\@-depth > 0@ since those reference already-computed past worlds and
+-- do not participate in the current fixed-point (paper §5.2).
+--
+-- __Closed World Assumption.__ Any ground atom not derivable in a world
+-- is considered false. Negated conditions succeed when no matching
+-- positive instance exists.
+--
+-- __External predicates.__ @=@, @>@, @<@, @>=@, @<=@, @true@, @false@,
+-- and @at(N)@ are evaluated specially, not stored in the world set.
 module TemporalProlog.Interpreter
   ( InterpreterState(..)
   , newInterpreterState
@@ -77,7 +101,7 @@ stepWorldN :: Int -> InterpreterState -> InterpreterState
 stepWorldN 0 st = st
 stepWorldN n st = stepWorldN (n-1) (stepWorld st)
 
--- | Compute a world by finding the least fixed point of all rules
+-- | Compute a world by stratified fixed-point iteration
 computeWorld :: NormalProgram -> [World] -> Set GroundAtom -> Int -> World
 computeWorld prog history assertions worldNum =
   let -- Stratify the program
@@ -193,7 +217,7 @@ satisfyNegated atom targetWorld _currentWorld =
         then [emptySubst]
         else []
 
--- | Evaluate external/built-in predicates
+-- | Evaluate built-in predicates that don't participate in the world set
 evaluateExternal :: Atom -> Maybe Bool
 evaluateExternal (Atom "true" []) = Just True
 evaluateExternal (Atom "false" []) = Just False
@@ -221,9 +245,7 @@ termToInt _ = Nothing
 -- Stratification
 -- ============================================================
 
--- | Compute dependency strata for the program.
---   Simple approach: predicates that depend negatively on each other
---   go in different strata. Positive dependencies can be in the same stratum.
+-- | Partition rules into strata for negation-safe evaluation
 stratify :: NormalProgram -> [[NormalRule]]
 stratify prog =
   let strataMap = computeStrata prog

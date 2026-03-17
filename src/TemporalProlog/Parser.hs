@@ -1,4 +1,28 @@
 {-# LANGUAGE OverloadedStrings #-}
+-- |
+-- Module      : TemporalProlog.Parser
+-- Description : Megaparsec-based parser for Temporal Prolog
+--
+-- Parses Temporal Prolog source text into the AST defined in
+-- "TemporalProlog.Syntax". Supports both ASCII and Unicode operator
+-- syntax:
+--
+-- @
+-- ASCII     Unicode   Meaning
+-- =>        ⇒         implication
+-- /\\       ∧         conjunction
+-- ->        →         pattern function arrow
+-- \@        ●         previous-time operator
+-- ~         ¬         negation
+-- #         ■         has-been (continuously true from start)
+-- ?         ◆         once (true at some past time)
+-- always    □         always (henceforth)
+-- @
+--
+-- Operator precedence (tightest to loosest):
+-- unary (@\@, ~, #, ?) > binary (since, after, for, until, atnext) > conjunction (/\\) > implication (=>)
+--
+-- Comments start with @%@ and extend to end of line.
 module TemporalProlog.Parser
   ( parseProgram
   , parseRule

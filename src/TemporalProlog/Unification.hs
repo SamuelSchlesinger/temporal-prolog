@@ -1,3 +1,17 @@
+-- |
+-- Module      : TemporalProlog.Unification
+-- Description : Term unification and one-way matching
+--
+-- Implements Robinson unification with occurs check for 'Term' values,
+-- and one-way matching used by the interpreter to match rule patterns
+-- against ground atoms in a world.
+--
+-- 'unifyTerm' finds a most general unifier for two terms. 'matchAtom'
+-- performs one-directional matching where only variables in the first
+-- (pattern) argument are bound — the second argument is treated as ground.
+--
+-- Both operations handle 'TPrev' structurally: @\@t1@ unifies with @\@t2@
+-- if @t1@ unifies with @t2@.
 module TemporalProlog.Unification where
 
 import qualified Data.Map.Strict as Map
