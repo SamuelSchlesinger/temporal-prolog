@@ -2,6 +2,7 @@ module TemporalProlog.Normalizer
   ( normalize
   , step1
   , step2
+  , eliminateTermPrev
   , step3
   , step4
   , step5
@@ -283,6 +284,74 @@ nestPrev 0 c = c
 nestPrev n c = CPrev (nestPrev (n-1) c)
 
 -- ============================================================
+-- Eliminate term-level TPrev by converting to condition-level CPrev
+-- After this pass, no Term contains TPrev.
+-- ============================================================
+
+-- | Eliminate TPrev from terms by converting to condition-level CPrev.
+-- For each atom, if all terms have the same outermost TPrev depth,
+-- strip the TPrevs and wrap the condition in that many CPrev layers.
+-- Mixed depths within a single atom are not yet supported.
+eliminateTermPrev :: [Rule] -> [Rule]
+eliminateTermPrev = map eliminateTermPrevRule
+
+eliminateTermPrevRule :: Rule -> Rule
+eliminateTermPrevRule (Fact (RAtom a)) =
+  case maxTermPrevInAtom a of
+    0 -> Fact (RAtom a)
+    _ -> error $ "TPrev in head atom not allowed: " ++ show a
+eliminateTermPrevRule (Fact r) = Fact r
+eliminateTermPrevRule (Rule conds result) =
+  case result of
+    RAtom a | maxTermPrevInAtom a > 0 ->
+      error $ "TPrev in head atom not allowed: " ++ show a
+    _ -> Rule (map liftTermPrev conds) result
+
+-- | For a condition, find TPrev in its atom terms and lift to CPrev.
+liftTermPrev :: Cond -> Cond
+liftTermPrev (CAtom (Atom name terms)) =
+  let depths = map termPrevDepth terms
+      maxD = maximum (0 : depths)
+  in if maxD == 0
+     then CAtom (Atom name terms)
+     else if all (== maxD) depths
+          then let terms' = map (stripTermPrevN maxD) terms
+               in nestCPrev maxD (CAtom (Atom name terms'))
+          else error $ "Mixed TPrev depths in atom not supported: " ++
+                       show (Atom name terms) ++
+                       " (depths: " ++ show depths ++ ")"
+liftTermPrev (CPrev c) = CPrev (liftTermPrev c)
+liftTermPrev (CNeg c) = CNeg (liftTermPrev c)
+liftTermPrev (CAnd cs) = CAnd (map liftTermPrev cs)
+liftTermPrev c = c
+
+-- | Get the outermost TPrev depth of a term
+termPrevDepth :: Term -> Int
+termPrevDepth (TPrev t) = 1 + termPrevDepth t
+termPrevDepth _ = 0
+
+-- | Get max TPrev depth across all terms in an atom (including nested in TFun)
+maxTermPrevInAtom :: Atom -> Int
+maxTermPrevInAtom (Atom _ terms) = maximum (0 : map maxTermPrevInTerm terms)
+
+-- | Get max TPrev depth anywhere in a term (including inside TFun)
+maxTermPrevInTerm :: Term -> Int
+maxTermPrevInTerm (TPrev t) = 1 + maxTermPrevInTerm t
+maxTermPrevInTerm (TFun _ ts) = maximum (0 : map maxTermPrevInTerm ts)
+maxTermPrevInTerm _ = 0
+
+-- | Strip n layers of TPrev from a term
+stripTermPrevN :: Int -> Term -> Term
+stripTermPrevN 0 t = t
+stripTermPrevN n (TPrev t) = stripTermPrevN (n-1) t
+stripTermPrevN _ t = t
+
+-- | Wrap a condition in n layers of CPrev
+nestCPrev :: Int -> Cond -> Cond
+nestCPrev 0 c = c
+nestCPrev n c = CPrev (nestCPrev (n-1) c)
+
+-- ============================================================
 -- Step 3: Expand pattern functions
 -- (Simplified: we convert pattern func defs into predicate rules)
 -- ============================================================
@@ -424,8 +493,10 @@ normalize (Program rules pfs) = do
   r1 <- step1 ref rules
   -- Step 2: eliminate since, after, for, has-been, once
   r2 <- step2 ref r1
+  -- Step 2.5: eliminate term-level TPrev
+  let r2' = eliminateTermPrev r2
   -- Step 3: expand pattern functions
-  let r3 = step3 pfs r2
+  let r3 = step3 pfs r2'
   -- Step 4: push negation to atoms
   r4 <- step4 ref r3
   -- Step 5: distribute @ over /\
