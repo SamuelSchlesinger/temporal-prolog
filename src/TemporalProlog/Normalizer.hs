@@ -33,6 +33,7 @@ module TemporalProlog.Normalizer
   , step1
   , step2
   , eliminateTermPrev
+  , eliminateTermPrevM
   , step3
   , step4
   , step5
@@ -40,6 +41,7 @@ module TemporalProlog.Normalizer
 
 import Control.Monad (unless)
 import Data.IORef
+import Data.List (nub)
 import qualified Data.Set as Set
 import System.IO (hPutStrLn, stderr)
 import TemporalProlog.PrettyPrint (ppNormalRule)
@@ -348,7 +350,10 @@ nestPrev n c = CPrev (nestPrev (n-1) c)
 -- | Eliminate TPrev from terms by converting to condition-level CPrev.
 -- For each atom, if all terms have the same outermost TPrev depth,
 -- strip the TPrevs and wrap the condition in that many CPrev layers.
--- Mixed depths within a single atom are not yet supported.
+-- Mixed depths within a single atom are decomposed into auxiliary
+-- predicates that project argument subsets at each distinct depth.
+--
+-- Pure version (legacy): errors on mixed depths.
 eliminateTermPrev :: [Rule] -> [Rule]
 eliminateTermPrev = map eliminateTermPrevRule
 
@@ -365,6 +370,7 @@ eliminateTermPrevRule (Rule conds result) =
     _ -> Rule (map liftTermPrev conds) result
 
 -- | For a condition, find TPrev in its atom terms and lift to CPrev.
+-- Pure version: errors on mixed depths.
 liftTermPrev :: Cond -> Cond
 liftTermPrev (CAtom (Atom name terms)) =
   let depths = map termPrevDepth terms
@@ -381,6 +387,106 @@ liftTermPrev (CPrev c) = CPrev (liftTermPrev c)
 liftTermPrev (CNeg c) = CNeg (liftTermPrev c)
 liftTermPrev (CAnd cs) = CAnd (map liftTermPrev cs)
 liftTermPrev c = c
+
+-- | Monadic version: handles mixed TPrev depths by decomposing into
+-- auxiliary predicates. Returns the transformed rules plus any new
+-- auxiliary rules needed for projection.
+eliminateTermPrevM :: IORef Int -> [Rule] -> IO [Rule]
+eliminateTermPrevM ref rules = do
+  results <- mapM (eliminateTermPrevRuleM ref) rules
+  return (concat results)
+
+eliminateTermPrevRuleM :: IORef Int -> Rule -> IO [Rule]
+eliminateTermPrevRuleM _ (Fact (RAtom a)) =
+  case maxTermPrevInAtom a of
+    0 -> return [Fact (RAtom a)]
+    _ -> error $ "TPrev in head atom not allowed: " ++ show a
+eliminateTermPrevRuleM _ (Fact r) = return [Fact r]
+eliminateTermPrevRuleM ref (Rule conds result) =
+  case result of
+    RAtom a | maxTermPrevInAtom a > 0 ->
+      error $ "TPrev in head atom not allowed: " ++ show a
+    _ -> do
+      results <- mapM (liftTermPrevM ref) conds
+      let (conds', ruleLists) = unzip results
+      return (Rule conds' result : concat ruleLists)
+
+-- | Monadic version of liftTermPrev: returns the transformed condition
+-- plus any auxiliary rules needed for mixed-depth decomposition.
+liftTermPrevM :: IORef Int -> Cond -> IO (Cond, [Rule])
+liftTermPrevM ref (CAtom (Atom name terms)) = do
+  let depths = map termPrevDepth terms
+      maxD = maximum (0 : depths)
+  if maxD == 0
+    then return (CAtom (Atom name terms), [])
+    else if all (== maxD) depths
+      then let terms' = map (stripTermPrevN maxD) terms
+           in return (nestCPrev maxD (CAtom (Atom name terms')), [])
+      else decomposeMixedDepths ref name terms depths
+liftTermPrevM ref (CPrev c) = do
+  (c', rules) <- liftTermPrevM ref c
+  return (CPrev c', rules)
+liftTermPrevM ref (CNeg c) = do
+  (c', rules) <- liftTermPrevM ref c
+  return (CNeg c', rules)
+liftTermPrevM ref (CAnd cs) = do
+  results <- mapM (liftTermPrevM ref) cs
+  let (cs', ruleLists) = unzip results
+  return (CAnd cs', concat ruleLists)
+liftTermPrevM _ c = return (c, [])
+
+-- | Decompose an atom with mixed TPrev depths into a conjunction of
+-- conditions at different depths, plus auxiliary projection rules.
+--
+-- For example, @p(\@X, Y)@ with depths [1, 0] becomes:
+--   - Main condition: @p(X, Y)@ (all TPrevs stripped, at depth 0)
+--   - Auxiliary condition: @\@p_d1_auxN(X)@ (depth-1 args checked at previous world)
+--   - Auxiliary rule: @p(A, B) => p_d1_auxN(A).@ (projects depth-1 arg positions)
+--
+-- If the minimum depth is > 0, we first strip that minimum from all terms
+-- and wrap the entire result in that many CPrev layers.
+decomposeMixedDepths :: IORef Int -> Name -> [Term] -> [Int] -> IO (Cond, [Rule])
+decomposeMixedDepths ref name terms depths = do
+  let minD = minimum depths
+      -- Strip minD from all terms, reducing minimum depth to 0
+      adjusted = map (\t -> stripTermPrevN minD t) terms
+      adjustedDepths = map (\d -> d - minD) depths
+
+  if all (== 0) adjustedDepths
+    -- After stripping, all depths are uniform (shouldn't happen for mixed, but handle it)
+    then return (nestCPrev minD (CAtom (Atom name adjusted)), [])
+    else do
+      -- Now minimum adjusted depth is 0, and some are > 0.
+      -- Group args by their adjusted depth.
+      let indexed = zip3 [0..] adjusted adjustedDepths
+          nonZeroDs = nub $ filter (> 0) adjustedDepths
+
+      auxResults <- mapM (\d -> do
+            -- Indices with this adjusted depth
+            let indicesAtD = [i | (i, _, dd) <- indexed, dd == d]
+                -- Strip remaining d levels from those terms to get base terms
+                strippedTerms = [stripTermPrevN d (adjusted !! i) | i <- indicesAtD]
+            auxName <- freshName ref (name ++ "_d" ++ show d)
+            -- Auxiliary condition: check these args at depth d
+            let auxCond = nestCPrev d (CAtom (Atom auxName strippedTerms))
+            -- Auxiliary projection rule: from the original predicate, project these positions
+            -- Use fresh variables for all positions of the original predicate
+            let freshVars = [TVar ("_TP" ++ show i) | i <- [0..length terms - 1]]
+                projArgs = [freshVars !! i | i <- indicesAtD]
+                auxRule = Rule [CAtom (Atom name freshVars)] (RAtom (Atom auxName projArgs))
+            return (auxCond, auxRule)
+          ) nonZeroDs
+
+      -- Build the main condition with all TPrevs fully stripped (base terms)
+      let baseTerms = [stripTermPrevN d t | (_, t, d) <- indexed]
+          mainCond = CAtom (Atom name baseTerms)
+          -- Combine: main condition + all auxiliary conditions
+          allConds = mainCond : map fst auxResults
+          combined = CAnd allConds
+          -- Wrap everything in the minimum depth
+          wrappedCond = nestCPrev minD combined
+          allRules = map snd auxResults
+      return (wrappedCond, allRules)
 
 -- | Get the outermost TPrev depth of a term
 termPrevDepth :: Term -> Int
@@ -630,8 +736,8 @@ normalize (Program rules pfs) = do
   r1 <- step1 ref rules
   -- Step 2: eliminate since, after, for, has-been, once
   r2 <- step2 ref r1
-  -- Step 2.5: eliminate term-level TPrev
-  let r2' = eliminateTermPrev r2
+  -- Step 2.5: eliminate term-level TPrev (monadic: handles mixed depths)
+  r2' <- eliminateTermPrevM ref r2
   -- Step 3: expand pattern functions
   r3 <- step3 ref pfs r2'
   -- Step 4: push negation to atoms
@@ -657,6 +763,8 @@ validateSafety = mapM_ checkRule
           negVars = Set.unions [fvAtom (ncAtom c) | c <- nrConditions rule, ncNegated c, ncPrevDepth c == 0]
           unsafeVars = negVars `Set.difference` posVars
       unless (Set.null unsafeVars) $
-        hPutStrLn stderr $ "Warning: unsafe rule - variables " ++ show (Set.toList unsafeVars) ++
-                          " in negated conditions not bound by positive conditions: " ++
-                          ppNormalRule rule
+        hPutStrLn stderr $ "Warning: variable(s) " ++ show (Set.toList unsafeVars) ++
+                          " appear in negated condition(s) but are not bound by any positive condition.\n" ++
+                          "  Rule: " ++ ppNormalRule rule ++ "\n" ++
+                          "  Hint: bind variables in positive conditions first, e.g.:\n" ++
+                          "    r(X) /\\ ~p(X) => q(X).    -- X is bound by r(X) before ~p(X)"

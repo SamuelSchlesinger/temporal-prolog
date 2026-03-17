@@ -270,14 +270,11 @@ Supporting modules:
   depths (e.g., `p(@X, @@Y)`), the normalizer raises an error rather than
   introducing auxiliary predicates to handle the mixed case.
 
-- **Negation with free variables**: Negated conditions with unbound variables
-  (e.g., `~p(X)` where `X` is not bound by a positive condition) trigger a
-  safety warning. The interpreter treats the negation as succeeding if no
-  matching positive instance exists, but this can produce unexpected results.
-
-- **`at(N)` with `@`-depth**: The `at(N)` built-in always evaluates against
-  the current world number, even when accessed through `@` operators. It does
-  not adjust for the `@`-depth of the enclosing condition.
+- **Negation with free variables**: Negation-as-failure (`~p(X)`) does not bind
+  variables — it only checks whether matching facts exist. Variables in negated
+  conditions must be bound by a preceding positive condition. The safety
+  validator warns when this is violated. This follows standard Prolog semantics
+  for safe negation.
 
 ## References
 

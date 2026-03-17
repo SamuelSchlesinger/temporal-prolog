@@ -24,6 +24,7 @@ main = hspec $ do
   stratificationSpec
   safetyValidationSpec
   edgeCaseSpec
+  mixedTPrevSpec
 
 -- Helper: parse and normalize a program string
 parseAndNormalize :: String -> IO NormalProgram
@@ -370,6 +371,25 @@ unificationEqualitySpec = describe "Unification = and at(X)" $ do
                      Left _ -> error "bad parse"
     Set.member lateAtom world3 `shouldBe` False
 
+  it "at(N) respects @-depth" $ do
+    -- @at(N) at world 2 should give N=1 (previous world number)
+    let prog = "@at(N) /\\ N = 1 => prev_was_one."
+    np <- parseAndNormalize prog
+    let st = stepWorldN 3 (newInterpreterState np)
+    worldContains st "prev_was_one" `shouldBe` True
+
+  it "at(N) at depth 0 still works" $ do
+    let prog = "at(N) /\\ N = 2 => is_world_two."
+    np <- parseAndNormalize prog
+    let st = stepWorldN 3 (newInterpreterState np)
+    worldContains st "is_world_two" `shouldBe` True
+
+  it "@@at(N) gives world number minus 2" $ do
+    let prog = "@@at(N) /\\ N = 1 => two_back_was_one."
+    np <- parseAndNormalize prog
+    let st = stepWorldN 4 (newInterpreterState np)
+    worldContains st "two_back_was_one" `shouldBe` True
+
 -- ============================================================
 -- I. Stratification
 -- ============================================================
@@ -434,6 +454,48 @@ edgeCaseSpec = describe "Edge cases" $ do
     let prog = "p(X) /\\ X = X => q(X).\n"
     st <- runWithAssertions prog [(0, ["p(a)"])] 1
     worldContains st "q(a)" `shouldBe` True
+
+-- ============================================================
+-- N. Mixed TPrev depths
+-- ============================================================
+
+mixedTPrevSpec :: Spec
+mixedTPrevSpec = describe "Mixed TPrev depths" $ do
+  it "p(@X, Y) normalizes without error" $ do
+    -- Previously this would error with "Mixed TPrev depths..."
+    np <- parseAndNormalize "p(@X, Y) => q(X, Y)."
+    length np `shouldSatisfy` (> 0)
+
+  it "p(@X, @@Y) normalizes without error" $ do
+    np <- parseAndNormalize "p(@X, @@Y) => q(X, Y)."
+    length np `shouldSatisfy` (> 0)
+
+  it "p(@X, Y, @@Z) normalizes without error" $ do
+    np <- parseAndNormalize "p(@X, Y, @@Z) => q(X, Y, Z)."
+    length np `shouldSatisfy` (> 0)
+
+  it "mixed depths end-to-end: p(@X, X) matches across worlds" $ do
+    -- p(@X, X) means: match p(a, b) in the current world where
+    -- a appeared in p's first argument at the previous world, and b = X.
+    -- World 0: assert p(hello, hello) -> projection aux derives
+    -- World 1: assert p(hello, hello) -> @aux(hello) succeeds, p(hello, hello) matches
+    let prog = unlines
+          [ "p(@X, X) => matched(X)."
+          ]
+    st <- runWithAssertions prog [(0, ["p(hello, hello)"]), (1, ["p(hello, hello)"])] 2
+    worldContains st "matched(hello)" `shouldBe` True
+
+  it "mixed depths: depth-0 only args still work" $ do
+    -- If all depths happen to be 0, it should still work fine
+    let prog = "p(X, Y) => q(X, Y)."
+    st <- runWithAssertions prog [(0, ["p(a, b)"])] 1
+    worldContains st "q(a, b)" `shouldBe` True
+
+  it "mixed depths: uniform non-zero depths still work" $ do
+    -- If all depths are the same non-zero value, the existing logic handles it
+    let prog = "@p(X, Y) => q(X, Y)."
+    st <- runWithAssertions prog [(0, ["p(a, b)"])] 2
+    worldContains st "q(a, b)" `shouldBe` True
 
 -- Helper to filter internal atoms
 isInternal :: Atom -> Bool

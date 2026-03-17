@@ -175,9 +175,10 @@ satisfyCond (NormalCond depth negated atom) history worldNum world =
         then [emptySubst]  -- negation of something in non-existent world is true
         else []
     Just tw ->
-      if negated
-        then satisfyNegated atom tw world worldNum
-        else satisfyPositive atom tw worldNum
+      let effectiveWorldNum = worldNum - depth
+      in if negated
+        then satisfyNegated atom tw world effectiveWorldNum
+        else satisfyPositive atom tw effectiveWorldNum
 
 -- | Look up a world at depth d in the past
 --   depth 0 = current world being constructed
