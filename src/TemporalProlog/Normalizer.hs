@@ -274,31 +274,111 @@ nestPrev n c = CPrev (nestPrev (n-1) c)
 -- (Simplified: we convert pattern func defs into predicate rules)
 -- ============================================================
 
-step3 :: [PatternFunc] -> [Rule] -> [Rule]
-step3 [] rules = rules
-step3 pfs rules =
+step3 :: IORef Int -> [PatternFunc] -> [Rule] -> FreshM [Rule]
+step3 _ [] rules = return rules
+step3 ref pfs rules = do
   -- First substep: convert f(t1,...,tk) -> t0 into f(t1,...,tk,t0) predicate
   let pfRules = map patternFuncToRule pfs
-      -- Second substep: expand function calls in terms within rules
-      rules' = map (expandFuncCallsInRule pfs) rules
-  in pfRules ++ rules'
+      pfNames = Set.fromList [n | PatternFunc n _ _ <- pfs]
+  -- Second substep: expand function calls in terms within rules
+  rules' <- expandRulesFixpoint ref pfNames rules
+  return (pfRules ++ rules')
 
 patternFuncToRule :: PatternFunc -> Rule
 patternFuncToRule (PatternFunc f args body) =
   Fact (RAtom (Atom f (args ++ [body])))
 
--- Replace occurrences of pattern function calls f(t1,...,tk) in terms
--- with a fresh variable X, and add condition f(t1,...,tk,X) to the rule
-expandFuncCallsInRule :: [PatternFunc] -> Rule -> Rule
-expandFuncCallsInRule pfs rule =
-  let pfNames = [n | PatternFunc n _ _ <- pfs]
-  in expandRule pfNames rule
+-- Iterate expansion until no pattern function calls remain in any rule
+expandRulesFixpoint :: IORef Int -> Set.Set Name -> [Rule] -> FreshM [Rule]
+expandRulesFixpoint ref pfNames rules = do
+  results <- mapM (expandRule ref pfNames) rules
+  let (rules', changed) = unzip results
+  if or changed
+    then expandRulesFixpoint ref pfNames rules'
+    else return rules'
 
-expandRule :: [Name] -> Rule -> Rule
-expandRule _ rule = rule  -- For now, pass through. Full expansion would require
-                          -- detecting function applications in term position.
-                          -- The simple case (explicit -> definitions) is handled
-                          -- by converting to predicate facts above.
+-- Expand one rule: walk all terms, replace pattern function calls with fresh
+-- variables and accumulate new conditions.
+expandRule :: IORef Int -> Set.Set Name -> Rule -> FreshM (Rule, Bool)
+expandRule ref pfNames (Fact (RAtom (Atom p ts))) = do
+  (ts', newConds, changed) <- expandTerms ref pfNames 0 ts
+  if changed
+    then return (Rule newConds (RAtom (Atom p ts')), True)
+    else return (Fact (RAtom (Atom p ts')), False)
+expandRule ref pfNames (Rule cs r) = do
+  (r', rConds, rChanged) <- expandResult ref pfNames r
+  (cs', cConds, cChanged) <- expandConds ref pfNames cs
+  let allNewConds = rConds ++ cConds
+  if rChanged || cChanged
+    then return (Rule (cs' ++ allNewConds) r', True)
+    else return (Rule cs' r', False)
+expandRule _ _ rule = return (rule, False)
+
+-- Expand pattern function calls in a Result
+expandResult :: IORef Int -> Set.Set Name -> Result -> FreshM (Result, [Cond], Bool)
+expandResult ref pfNames (RAtom (Atom p ts)) = do
+  (ts', conds, changed) <- expandTerms ref pfNames 0 ts
+  return (RAtom (Atom p ts'), conds, changed)
+expandResult _ _ r = return (r, [], False)
+
+-- Expand pattern function calls in a list of conditions
+expandConds :: IORef Int -> Set.Set Name -> [Cond] -> FreshM ([Cond], [Cond], Bool)
+expandConds ref pfNames cs = do
+  results <- mapM (expandCond ref pfNames 0) cs
+  let (cs', condLists, changes) = unzip3 results
+  return (cs', concat condLists, or changes)
+
+-- Expand pattern function calls in a single condition, tracking TPrev depth
+expandCond :: IORef Int -> Set.Set Name -> Int -> Cond -> FreshM (Cond, [Cond], Bool)
+expandCond ref pfNames depth (CAtom (Atom p ts)) = do
+  (ts', conds, changed) <- expandTerms ref pfNames depth ts
+  return (CAtom (Atom p ts'), conds, changed)
+expandCond ref pfNames depth (CPrev c) = do
+  (c', conds, changed) <- expandCond ref pfNames (depth + 1) c
+  return (CPrev c', conds, changed)
+expandCond ref pfNames depth (CNeg c) = do
+  (c', conds, changed) <- expandCond ref pfNames depth c
+  return (CNeg c', conds, changed)
+expandCond ref pfNames depth (CAnd cs) = do
+  results <- mapM (expandCond ref pfNames depth) cs
+  let (cs', condLists, changes) = unzip3 results
+  return (CAnd cs', concat condLists, or changes)
+expandCond _ _ _ c = return (c, [], False)
+
+-- Expand pattern function calls in a list of terms. The depth parameter
+-- tracks how many TPrev wrappers we are inside, so new conditions get
+-- wrapped in the appropriate number of CPrev.
+expandTerms :: IORef Int -> Set.Set Name -> Int -> [Term] -> FreshM ([Term], [Cond], Bool)
+expandTerms ref pfNames depth ts = do
+  results <- mapM (expandTerm ref pfNames depth) ts
+  let (ts', condLists, changes) = unzip3 results
+  return (ts', concat condLists, or changes)
+
+-- Expand a single term. If it's a pattern function call TFun f args where f
+-- is a known pattern function, replace with a fresh variable and emit a
+-- new condition. Otherwise recurse into subterms.
+expandTerm :: IORef Int -> Set.Set Name -> Int -> Term -> FreshM (Term, [Cond], Bool)
+expandTerm ref pfNames depth (TFun f args)
+  | Set.member f pfNames = do
+      -- This is a pattern function call: replace with fresh var, add condition.
+      -- We don't recurse into args here; the fixpoint iteration will handle
+      -- any nested pattern function calls in subsequent passes.
+      v <- freshName ref "V"
+      let freshVar = TVar v
+          newCond = nestCPrev depth (CAtom (Atom f (args ++ [freshVar])))
+      return (freshVar, [newCond], True)
+  | otherwise = do
+      -- Not a pattern function, but recurse into subterms
+      (args', conds, changed) <- expandTerms ref pfNames depth args
+      return (TFun f args', conds, changed)
+expandTerm ref pfNames depth (TPrev t) = do
+  (t', conds, changed) <- expandTerm ref pfNames (depth + 1) t
+  return (TPrev t', conds, changed)
+expandTerm _ _ _ t@(TVar _) = return (t, [], False)
+
+nestCPrev :: Int -> Cond -> Cond
+nestCPrev 0 c = c
+nestCPrev n c = CPrev (nestCPrev (n-1) c)
 
 -- ============================================================
 -- Step 4: Push negation to atomic level
@@ -409,7 +489,7 @@ normalize (Program rules pfs) = do
   -- Step 2: eliminate since, after, for, has-been, once
   r2 <- step2 ref r1
   -- Step 3: expand pattern functions
-  let r3 = step3 pfs r2
+  r3 <- step3 ref pfs r2
   -- Step 4: push negation to atoms
   r4 <- step4 ref r3
   -- Step 5: distribute @ over /\
