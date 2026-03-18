@@ -57,6 +57,9 @@ unifyAtom (Atom p ts1) (Atom q ts2)
 
 -- | Match a pattern atom against a ground atom.
 --   Like unification but only substitutes variables in the pattern (first arg).
+--   Consistency for repeated variables (e.g. @p(X, X)@) is guaranteed because
+--   intermediate substitutions are applied before matching subsequent arguments:
+--   the second @X@ becomes ground after substitution and must structurally match.
 matchAtom :: Atom -> Atom -> Maybe Subst
 matchAtom (Atom p ts1) (Atom q ts2)
   | p == q && length ts1 == length ts2 = matchTerms ts1 ts2

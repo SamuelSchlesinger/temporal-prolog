@@ -1,6 +1,6 @@
-% Pattern function showcase: list append
+% Pattern function showcase: recursive list append
 % Demonstrates pattern function definitions (f(args) -> body.)
-% and their use in rules after expansion to predicates.
+% resolved via backward chaining at query time.
 
 % Pattern function definitions for list append
 append([], X) -> X.

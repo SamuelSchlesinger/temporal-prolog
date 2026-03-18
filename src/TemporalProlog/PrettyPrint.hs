@@ -16,10 +16,16 @@ ppTerm (TVar v)      = v
 ppTerm (TFun "[]" []) = "[]"
 ppTerm (TFun f [])   = f
 ppTerm (TFun "." [h, t]) = "[" ++ ppTerm h ++ ppListTail t ++ "]"
+ppTerm (TFun "+" [l, r]) = ppTermAtom l ++ " + " ++ ppTermAtom r
+ppTerm (TFun "-" [l, r]) = ppTermAtom l ++ " - " ++ ppTermAtom r
+ppTerm (TFun "*" [l, r]) = ppTermAtom l ++ " * " ++ ppTermAtom r
 ppTerm (TFun f ts)   = f ++ "(" ++ intercalate ", " (map ppTerm ts) ++ ")"
 ppTerm (TPrev t)     = "@" ++ ppTermAtom t
 
 ppTermAtom :: Term -> String
+ppTermAtom t@(TFun "+" _) = "(" ++ ppTerm t ++ ")"
+ppTermAtom t@(TFun "-" [_, _]) = "(" ++ ppTerm t ++ ")"
+ppTermAtom t@(TFun "*" _) = "(" ++ ppTerm t ++ ")"
 ppTermAtom t@(TFun _ (_:_)) = ppTerm t
 ppTermAtom t@(TVar _)       = ppTerm t
 ppTermAtom t@(TFun _ [])    = ppTerm t
@@ -32,6 +38,7 @@ ppListTail t                  = " | " ++ ppTerm t
 
 ppAtom :: Atom -> String
 ppAtom (Atom "=" [l, r])  = ppTerm l ++ " = " ++ ppTerm r
+ppAtom (Atom "is" [l, r]) = ppTerm l ++ " is " ++ ppTerm r
 ppAtom (Atom ">" [l, r])  = ppTerm l ++ " > " ++ ppTerm r
 ppAtom (Atom "<" [l, r])  = ppTerm l ++ " < " ++ ppTerm r
 ppAtom (Atom ">=" [l, r]) = ppTerm l ++ " >= " ++ ppTerm r

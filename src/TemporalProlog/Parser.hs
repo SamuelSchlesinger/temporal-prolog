@@ -1,4 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
 -- |
 -- Module      : TemporalProlog.Parser
 -- Description : Megaparsec-based parser for Temporal Prolog
@@ -20,7 +19,7 @@
 -- @
 --
 -- Operator precedence (tightest to loosest):
--- unary (@\@, ~, #, ?) > binary (since, after, for, until, atnext) > conjunction (/\\) > implication (=>)
+-- unary (@\@, ~, #, ?) > conjunction (/\\) > binary temporal (since, after, for) > implication (=>) / result binary (until, atnext)
 --
 -- Comments start with @%@ and extend to end of line.
 module TemporalProlog.Parser
@@ -29,6 +28,7 @@ module TemporalProlog.Parser
   , parseCond
   , parseAtom
   , parseTerm
+  , parseProgramItem
   , parseFile
   ) where
 
@@ -58,7 +58,7 @@ integer = lexeme L.decimal
 
 -- Keywords
 reserved :: [String]
-reserved = ["since", "after", "for", "until", "atnext", "always", "eventually", "next", "true", "false"]
+reserved = ["since", "after", "for", "until", "atnext", "always", "eventually", "next", "true", "false", "is"]
 
 -- An atom name: starts with lowercase or is a quoted atom
 atomName :: Parser Name
@@ -100,34 +100,57 @@ opHasBeen = lexeme (char '#' <|> char '\x25A0')  -- ■
 opOnce :: Parser Char
 opOnce = lexeme (char '?' <|> char '\x25C6')  -- ◆
 
+-- | Parse a keyword: the word must not be followed by alphanumeric or underscore
+keyword :: String -> Parser ()
+keyword w = lexeme $ try $ do
+  _ <- string w
+  notFollowedBy (satisfy (\ch -> isAlphaNum ch || ch == '_'))
+
 kwAlways :: Parser ()
-kwAlways = void (symbol "always" <|> symbol "\x25A1")  -- □
+kwAlways = keyword "always" <|> void (symbol "\x25A1")  -- □
 
 kwEventually :: Parser ()
-kwEventually = void (symbol "eventually" <|> symbol "\x25C7")  -- ◇
+kwEventually = keyword "eventually" <|> void (symbol "\x25C7")  -- ◇
 
 kwNext :: Parser ()
-kwNext = void (symbol "next" <|> symbol "\x25CB")  -- ○
+kwNext = keyword "next" <|> void (symbol "\x25CB")  -- ○
 
 kwSince :: Parser ()
-kwSince = void (symbol "since")
+kwSince = keyword "since"
 
 kwAfter :: Parser ()
-kwAfter = void (symbol "after")
+kwAfter = keyword "after"
 
 kwFor :: Parser ()
-kwFor = void (symbol "for")
+kwFor = keyword "for"
 
 kwUntil :: Parser ()
-kwUntil = void (symbol "until")
+kwUntil = keyword "until"
 
 kwAtNext :: Parser ()
-kwAtNext = void (symbol "atnext")
+kwAtNext = keyword "atnext"
 
 -- Term parsing
 
+-- Term precedence (tightest to loosest):
+-- atoms/parens > @ prefix > * > +, -
 pTerm :: Parser Term
-pTerm = pTermPrev
+pTerm = pTermAdd
+
+pTermAdd :: Parser Term
+pTermAdd = do
+  t <- pTermMul
+  rest <- many $ choice
+    [ do _ <- symbol "+"; r <- pTermMul; return ("+", r)
+    , do _ <- try (symbol "-" <* notFollowedBy (char '>')); r <- pTermMul; return ("-", r)
+    ]
+  return $ foldl (\acc (op, r) -> TFun op [acc, r]) t rest
+
+pTermMul :: Parser Term
+pTermMul = do
+  t <- pTermPrev
+  rest <- many $ do _ <- symbol "*"; r <- pTermPrev; return r
+  return $ foldl (\acc r -> TFun "*" [acc, r]) t rest
 
 pTermPrev :: Parser Term
 pTermPrev = do
@@ -146,9 +169,13 @@ pTermAtom = choice
   ]
 
 pNumber :: Parser Term
-pNumber = do
+pNumber = try $ do
+  neg <- optional (try (char '-' <* notFollowedBy (char '>')))
   n <- integer
-  return (TFun (show n) [])
+  let val = case neg of
+              Just _  -> negate n
+              Nothing -> n
+  return (TFun (show val) [])
 
 pAtomTerm :: Parser Term
 pAtomTerm = do
@@ -207,34 +234,37 @@ pInfixAtom = do
     , "<=" <$ symbol "<="
     , ">"  <$ symbol ">"
     , "<"  <$ symbol "<"
-    , "="  <$ symbol "="
+    , "="  <$ try (symbol "=" <* notFollowedBy (char '>'))
+    , "is" <$ keyword "is"
     ]
   r <- pTerm
   return (Atom op [l, r])
 
 -- Condition parsing
 
+-- Operator precedence (tightest to loosest):
+-- unary (@, ~, #, ?) > conjunction (/\) > binary temporal (since, after, for) > implication (=>)
 pCond :: Parser Cond
-pCond = pCondAnd
-
-pCondAnd :: Parser Cond
-pCondAnd = do
-  cs <- pCondSinceAfterFor `sepBy1` opAnd
-  case cs of
-    [c] -> return c
-    _   -> return (CAnd cs)
+pCond = pCondSinceAfterFor
 
 pCondSinceAfterFor :: Parser Cond
 pCondSinceAfterFor = do
-  c <- pCondUnary
+  c <- pCondAnd
   rest <- optional $ choice
-    [ do kwSince; d <- pCondUnary; return (CSince c d)
-    , do kwAfter; d <- pCondUnary; return (CAfter c d)
+    [ do kwSince; d <- pCondAnd; return (CSince c d)
+    , do kwAfter; d <- pCondAnd; return (CAfter c d)
     , do kwFor; n <- integer; return (CFor c n)
     ]
   case rest of
     Nothing -> return c
     Just r  -> return r
+
+pCondAnd :: Parser Cond
+pCondAnd = do
+  cs <- pCondUnary `sepBy1` opAnd
+  case cs of
+    [c] -> return c
+    _   -> return (CAnd cs)
 
 pCondUnary :: Parser Cond
 pCondUnary = choice
@@ -248,9 +278,18 @@ pCondUnary = choice
 
 pCondAtom :: Parser Cond
 pCondAtom = choice
-  [ CAtom <$> try pAtom
+  [ try pNotEqual
+  , CAtom <$> try pAtom
   , between (symbol "(") (symbol ")") pCond
   ]
+
+-- | Parse != or \= as syntactic sugar for ~(X = Y)
+pNotEqual :: Parser Cond
+pNotEqual = do
+  l <- pTerm
+  _ <- symbol "!=" <|> symbol "\\="
+  r <- pTerm
+  return (CNeg (CAtom (Atom "=" [l, r])))
 
 -- Result parsing
 
@@ -350,6 +389,9 @@ parseAtom = parse (sc *> pAtom <* eof)
 
 parseTerm :: String -> String -> Either (ParseErrorBundle String Void) Term
 parseTerm = parse (sc *> pTerm <* eof)
+
+parseProgramItem :: String -> String -> Either (ParseErrorBundle String Void) (Either PatternFunc Rule)
+parseProgramItem = parse (sc *> pProgramItem <* eof)
 
 parseFile :: FilePath -> IO (Either (ParseErrorBundle String Void) Program)
 parseFile fp = do

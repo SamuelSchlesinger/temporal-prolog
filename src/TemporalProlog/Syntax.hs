@@ -99,8 +99,53 @@ type NormalProgram = [NormalRule]
 -- | Ground atom (no variables)
 type GroundAtom = Atom
 
--- | A world is a set of ground atoms true at that time step
-type World = Set GroundAtom
+-- | A world is a set of ground atoms true at that time step,
+--   indexed by predicate name for efficient lookup.
+data World = World
+  { worldIndex :: Map Name (Set GroundAtom)  -- atoms grouped by predicate name
+  } deriving (Eq, Ord, Show)
+
+-- | An empty world
+emptyWorld :: World
+emptyWorld = World Map.empty
+
+-- | All atoms in a world as a flat set
+worldToSet :: World -> Set GroundAtom
+worldToSet (World idx) = Set.unions (Map.elems idx)
+
+-- | Build a world from a set of ground atoms
+worldFromSet :: Set GroundAtom -> World
+worldFromSet = Set.foldl' (\w a -> worldInsert a w) emptyWorld
+
+-- | Insert a ground atom into a world
+worldInsert :: GroundAtom -> World -> World
+worldInsert a@(Atom p _) (World idx) =
+  World (Map.insertWith Set.union p (Set.singleton a) idx)
+
+-- | Check membership
+worldMember :: GroundAtom -> World -> Bool
+worldMember a@(Atom p _) (World idx) =
+  case Map.lookup p idx of
+    Nothing -> False
+    Just s  -> Set.member a s
+
+-- | Union of two worlds
+worldUnion :: World -> World -> World
+worldUnion (World a) (World b) = World (Map.unionWith Set.union a b)
+
+-- | Look up all atoms for a given predicate name
+worldLookupPred :: Name -> World -> Set GroundAtom
+worldLookupPred p (World idx) = Map.findWithDefault Set.empty p idx
+
+-- | Filter a world by a predicate on atoms
+worldFilter :: (GroundAtom -> Bool) -> World -> World
+worldFilter f (World idx) =
+  World (Map.mapMaybe (\s -> let s' = Set.filter f s
+                             in if Set.null s' then Nothing else Just s') idx)
+
+-- | Build a world from a list of ground atoms
+worldFromList :: [GroundAtom] -> World
+worldFromList = foldl (flip worldInsert) emptyWorld
 
 -- | Substitution: mapping from variables to terms
 type Subst = Map Var Term

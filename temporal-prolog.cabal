@@ -10,8 +10,9 @@ description:
     atoms) over discrete time steps. Conditions may reference past worlds
     via operators like @\@@ (previous), @#@ (has-been), and @?@ (once),
     while results may project into the future with @always@, @until@,
-    @atnext@, and @next@. Includes a five-step normalization pipeline and
-    a stratified least-fixed-point interpreter with negation-as-failure.
+    @atnext@, and @next@. Includes a five-step normalization pipeline, a
+    stratified least-fixed-point interpreter with negation-as-failure, and
+    backward chaining for recursive pattern functions.
 category:        Language
 author:          Samuel Schlesinger
 maintainer:      sgschlesinger@gmail.com

@@ -231,23 +231,28 @@ Step to compute the first world:
 > :step
 0> :world
 World 0:
+  combined([1, 2, 3, 1, 2, 3])
+  combined([1, 2, 3, 4, 5])
+  combined([4, 5, 1, 2, 3])
+  combined([4, 5, 4, 5])
   list([1, 2, 3])
   list([4, 5])
 ```
 
-The two `list` facts are derived. The `combined` rule depends on the
-`append` pattern function; recursive pattern function expansion is not yet
-fully supported, so `combined(Z)` is not derived in the current
-implementation:
+The two `list` facts are derived. The `combined` rule uses the `append`
+pattern function via backward chaining to compute all combinations:
 
 ```
-0> :query list(X)
-Yes.
-  X = [1, 2, 3]
-  X = [4, 5]
 0> :query combined(X)
-No.
+Yes.
+  X = [1, 2, 3, 1, 2, 3]
+  X = [1, 2, 3, 4, 5]
+  X = [4, 5, 1, 2, 3]
+  X = [4, 5, 4, 5]
 ```
+
+Since `list(X) /\ list(Y)` doesn't require X and Y to be distinct,
+we get all four combinations including self-appends.
 
 ---
 
