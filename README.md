@@ -96,8 +96,8 @@ Use `:history` to see all worlds at once.
 | `?`   | `◆`     | Condition | **Once** -- true at some past step          |
 | `eventually` | `◇` | Condition | Synonym for once (past-time)           |
 | `since` | --    | Condition | `a since b` -- a held since b became true   |
-| `after` | --    | Condition | `a after b` -- a held, then b became true   |
-| `for`   | --    | Condition | `a for n` -- a held for n consecutive steps |
+| `after` | --    | Condition | `a after b` -- `a` is the more recent event |
+| `for`   | --    | Condition | `a for n` -- a held for `n > 0` consecutive steps |
 | `always` | `□`  | Result    | **Always** -- holds from now on             |
 | `until`  | --   | Result    | `r until c` -- r holds until c becomes true |
 | `atnext` | --   | Result    | `r atnext c` -- r fires when c next holds   |
@@ -106,8 +106,8 @@ Use `:history` to see all worlds at once.
 ### Operator precedence (tightest to loosest)
 
 1. Unary: `@`, `~`, `#`, `?`
-2. Binary: `since`, `after`, `for`, `until`, `atnext`
-3. Conjunction: `/\`
+2. Condition conjunction: `/\`
+3. Binary conditions: `since`, `after`, `for`
 4. Implication: `=>`
 
 ## Rule syntax
@@ -142,6 +142,19 @@ be used inside rule conditions and heads:
 a(X) /\ b(Y) => combined(append(X, Y)).
 ```
 
+The conditional reduction form from Section 5.1 of the paper is also
+supported:
+
+```prolog
+enabled(X) => choose(X) -> selected.
+```
+
+The term-level `@` operator applies to a pattern-function value. During
+normalization, `present(@lookup(key))` becomes a current-world
+`present(Value)` condition together with a previous-world
+`@lookup(key, Value)` condition; it does not move `present` into the previous
+world.
+
 **Conjunction** uses `/\`:
 
 ```
@@ -157,7 +170,8 @@ hot(X) => off(X).  % inline comment
 
 **Variables** start with an uppercase letter (`X`, `Room`). **Atoms** and
 **predicates** start with a lowercase letter or underscore (`hot`, `_aux`).
-**Numbers** are non-negative integers (`0`, `42`).
+**Numbers** are integers (`-3`, `0`, `42`). The repetition count in `for`
+must be positive.
 
 ## REPL commands
 
@@ -302,8 +316,8 @@ The implementation follows a three-phase pipeline:
    introducing auxiliary predicates:
    - Step 1: Eliminate `always`, `until`, `atnext`, `next`; split conjunctions
    - Step 2: Eliminate `since`, `after`, `for`, `has-been`, `once`
-   - Step 2.5: Lift term-level `@` (TPrev) to condition-level `@` (CPrev)
-   - Step 3: Expand pattern functions into predicate clauses
+   - Step 3: Expand pattern functions into predicate clauses, transferring
+     term-level `@` depth to the generated pattern-function conditions
    - Step 4: Push negation to atomic level
    - Step 5: Distribute `@` over `/\` into canonical form `@^m(~?)atom`
 
@@ -323,6 +337,19 @@ The implementation follows a three-phase pipeline:
 
    External predicates (`=`, `>`, `<`, `>=`, `<=`, `at`, `true`, `false`)
    are evaluated specially.
+
+At world 0, every previous-time formula `@F` is false, exactly as defined in
+Section 5.2. In particular, `@~p` is false there, while `~@p` is true; the
+normalizer introduces the auxiliary predicate required by Step 4 to preserve
+that distinction.
+
+The executable engine implements the paper's least-model construction for
+programs satisfying Section 5.3's condition 1 (no current-world negative
+dependency cycle). It rejects such cycles instead of attempting the paper's
+more general, potentially nondeterministic set-of-minimal-models semantics.
+Rules whose negated variables are not grounded by positive conditions are
+reported as unsafe because Section 6.1 requires complete instantiation before
+negation as failure.
 
 Supporting modules:
 - `TemporalProlog.Syntax`: Core AST types (user-facing and normalized)
@@ -347,4 +374,4 @@ uses the domain fact `device(heater)` to bind `X` before the negation check.
 
 ## References
 
-Sakuragawa, H. (1986). "Temporal Prolog." *RIMS Kokyuroku*, 221-238.
+Sakuragawa, T. (1986). "Temporal Prolog." *RIMS Kokyuroku* 586, 305-329.

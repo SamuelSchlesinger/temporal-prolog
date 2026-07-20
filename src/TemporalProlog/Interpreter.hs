@@ -224,10 +224,11 @@ satisfyCond pfNames pfRules (NormalCond depth negated atom) worlds worldNum worl
   let targetWorld = lookupWorld depth worlds worldNum world
   in case targetWorld of
     Nothing ->
-      -- Past world doesn't exist (before time 0)
-      if negated
-        then [emptySubst]  -- negation of something in non-existent world is true
-        else []
+      -- Paper section 5.2: @F is false at world 0 regardless of F.  In
+      -- normal form the negation is inside the @ operators, so @~F is also
+      -- false when the referenced world does not exist.  An outer ~@F is
+      -- eliminated with an auxiliary predicate during normalization.
+      []
     Just tw ->
       let effectiveWorldNum = worldNum - depth
       in if negated
@@ -390,24 +391,26 @@ solveBCConds pfNames pfRules (c:cs) world worlds worldNum depth = do
 --   PF predicates recurse; others fall back to world lookup.
 --   Respects @-depth by looking up the appropriate past world.
 solveBCCond :: Set Name -> [NormalRule] -> NormalCond -> World -> IntMap World -> Int -> Int -> [Subst]
-solveBCCond pfNames pfRules (NormalCond depth negated atom) currentW worlds worldNum bcDepth
-  | negated =
-      if null (solveBCCond pfNames pfRules (NormalCond depth False atom) currentW worlds worldNum bcDepth)
-        then [emptySubst]
-        else []
-  | otherwise =
-      let targetWorld = lookupWorld depth worlds worldNum currentW
-          effectiveWorldNum = worldNum - depth
-      in case targetWorld of
-        Nothing ->
-          []  -- past world doesn't exist
-        Just tw
-          | predName atom `Set.member` pfNames ->
-              solveBackward pfNames pfRules atom tw worlds effectiveWorldNum (bcDepth + 1)
-          | otherwise ->
-              case evaluateExternal atom effectiveWorldNum of
-                Just substs -> substs
-                Nothing     -> matchInWorld atom tw
+solveBCCond pfNames pfRules (NormalCond depth negated atom) currentW worlds worldNum bcDepth =
+  let targetWorld = lookupWorld depth worlds worldNum currentW
+      effectiveWorldNum = worldNum - depth
+  in case targetWorld of
+    -- As in forward evaluation, @F is false at world 0 even when F is
+    -- negated.  The normalizer represents an outer ~@F with an auxiliary.
+    Nothing -> []
+    Just tw
+      | negated ->
+          if null (solveBCCond pfNames pfRules
+                     (NormalCond depth False atom)
+                     currentW worlds worldNum bcDepth)
+            then [emptySubst]
+            else []
+      | predName atom `Set.member` pfNames ->
+          solveBackward pfNames pfRules atom tw worlds effectiveWorldNum (bcDepth + 1)
+      | otherwise ->
+          case evaluateExternal atom effectiveWorldNum of
+            Just substs -> substs
+            Nothing     -> matchInWorld atom tw
 
 -- | Alpha-rename all variables in a rule to avoid capture.
 --   Uses a prefix based on depth and rule index to generate unique names.

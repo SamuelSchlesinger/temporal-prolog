@@ -1,5 +1,14 @@
 # Revision history for temporal-prolog
 
+## Unreleased
+
+* Align normalization and world-zero semantics with Sakuragawa's Section 5
+  transformations, including the distinct meanings of `~@p` and `@~p`.
+* Implement the paper's `after` recurrence and exact auxiliary-variable sets.
+* Expand term-level previous values at the pattern-function occurrence, and
+  support conditional pattern-function reductions.
+* Reject non-positive `for` counts and avoid collisions with generated names.
+
 ## 0.1.0.0 -- 2026-03-18
 
 * Initial release implementing Sakuragawa's (1986) Temporal Prolog.

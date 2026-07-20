@@ -253,7 +253,11 @@ pCondSinceAfterFor = do
   rest <- optional $ choice
     [ do kwSince; d <- pCondAnd; return (CSince c d)
     , do kwAfter; d <- pCondAnd; return (CAfter c d)
-    , do kwFor; n <- integer; return (CFor c n)
+    , do kwFor
+         n <- integer
+         if n > 0
+           then return (CFor c n)
+           else fail "the right operand of 'for' must be a positive integer"
     ]
   case rest of
     Nothing -> return c
@@ -323,9 +327,17 @@ pResultUnary = choice
 
 pResultAtom :: Parser Result
 pResultAtom = choice
-  [ RAtom <$> try pAtom
+  [ try pPatternFuncResult
+  , RAtom <$> try pAtom
   , between (symbol "(") (symbol ")") pResult
   ]
+
+pPatternFuncResult :: Parser Result
+pPatternFuncResult = do
+  f <- atomName
+  args <- between (symbol "(") (symbol ")") (pTerm `sepBy` symbol ",")
+  opArrow
+  RPatternFunc f args <$> pTerm
 
 -- Rule parsing
 

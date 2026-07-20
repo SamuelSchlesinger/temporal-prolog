@@ -21,7 +21,8 @@
 --    so recursive PF calls become conditions for backward chaining).
 --
 -- 4. __Step 4__ (p. 13): Push negation to the atomic level so that every
---    @~@ directly precedes an atom or @@^n(atom)@.
+--    @~@ directly precedes an atom. Negation outside a previous-time formula
+--    is preserved with an auxiliary predicate.
 --
 -- 5. __Step 5__ (p. 14): Distribute @\@@ over @/\\@ so each condition has
 --    the canonical form @@^m(~?)atom@.
@@ -47,7 +48,9 @@ import qualified Data.Set as Set
 import TemporalProlog.PrettyPrint (ppNormalRule)
 import TemporalProlog.Syntax
 
--- | Counter for generating fresh auxiliary names.
+-- | Counter for generating auxiliary predicate and variable names. The full
+-- normalizer seeds it above every source identifier ending in @_auxN@, which
+-- keeps generated identifiers fresh while preserving the public constructor.
 newtype FreshNameGen = FreshNameGen Int
 
 -- | Fresh name generation monad with error reporting.
@@ -122,17 +125,15 @@ step1Rule rule = case rule of
     step1Rule (Rule cs' r)
     where isCAnd (CAnd _) = True
           isCAnd _ = False
-  Fact (RAlways q) -> do
-    let vs = resultVars q
-        vterms = varsToTerms vs
-    p <- freshName "always"
-    let pAtom = Atom p vterms
-    return [ Fact q
-           , Rule [CPrev (CAtom pAtom)] (RAtom pAtom)
-           , Rule [CAtom pAtom] q
-           ]
+  -- Paper step 1(2): an unconditional []q is simply q.  A bare result
+  -- formula is required to hold at every world, so no persistence predicate
+  -- is needed here.
+  Fact (RAlways q) -> return [Fact q]
   Rule cs (RAlways q) -> do
-    let vs = Set.toList $ Set.union (Set.unions (map fvCond cs)) (fvResult q)
+    -- The paper puts exactly fv(q) in the auxiliary predicate.  Capturing
+    -- variables that occur only in the antecedent can make the recurrence
+    -- non-ground and silently disable an otherwise valid rule.
+    let vs = resultVars q
         vterms = varsToTerms vs
     p <- freshName "always"
     let pAtom = Atom p vterms
@@ -151,18 +152,11 @@ step1Rule rule = case rule of
     p <- freshName "until"
     let pAtom = Atom p vterms
     return [ Rule cs (RAtom pAtom)
-           , Rule [CPrev (CAtom pAtom), CNeg b] (RAtom pAtom)
+           , Rule [CPrev (CAtom pAtom), CPrev (CNeg b)] (RAtom pAtom)
            , Rule [CAtom pAtom, CNeg b] q
            ]
-  Fact (RAtNext q b) -> do
-    let vs = Set.toList $ Set.union (fvResult q) (fvCond b)
-        vterms = varsToTerms vs
-    p <- freshName "atnext"
-    let pAtom = Atom p vterms
-    return [ Fact (RAtom pAtom)
-           , Rule [CPrev (CAtom pAtom), CPrev (CNeg b)] (RAtom pAtom)
-           , Rule [CAtom pAtom, b] q
-           ]
+  -- Paper step 1(4): without an antecedent, q atnext b is b => q.
+  Fact (RAtNext q b) -> return [Rule [b] q]
   Rule cs (RAtNext q b) -> do
     let vs = Set.toList $ Set.union (fvResult q) (fvCond b)
         vterms = varsToTerms vs
@@ -238,9 +232,12 @@ findStep2 = go []
 
 transformStep2 :: Cond -> Result -> [Cond] -> FreshM [Rule]
 transformStep2 cond r otherConds = case cond of
+  -- Step 2 transformations can expose a conjunction that was nested inside
+  -- another temporal operator.  Step 1 has already run, so flatten it here
+  -- to expose any remaining operators instead of spinning to the fuel limit.
+  CAnd cs -> return [Rule (concatMap flattenConds cs ++ otherConds) r]
   CHasBeen a -> do
-    let allVars = Set.toList $ Set.unions
-          [fvCond a, Set.unions (map fvCond otherConds), fvResult r]
+    let allVars = Set.toList (fvCond a)
         vterms = varsToTerms allVars
     p <- freshName "hasbeen"
     let pAtom = Atom p vterms
@@ -250,8 +247,7 @@ transformStep2 cond r otherConds = case cond of
            , Rule [CPrev (CAtom pAtom), a] (RAtom pAtom)
            ]
   COnce a -> do
-    let allVars = Set.toList $ Set.unions
-          [fvCond a, Set.unions (map fvCond otherConds), fvResult r]
+    let allVars = Set.toList (fvCond a)
         vterms = varsToTerms allVars
     p <- freshName "once"
     let pAtom = Atom p vterms
@@ -261,8 +257,7 @@ transformStep2 cond r otherConds = case cond of
            , Rule [CPrev (CAtom pAtom)] (RAtom pAtom)
            ]
   CSince a b -> do
-    let allVars = Set.toList $ Set.unions
-          [fvCond a, fvCond b, Set.unions (map fvCond otherConds), fvResult r]
+    let allVars = Set.toList (Set.union (fvCond a) (fvCond b))
         vterms = varsToTerms allVars
     p <- freshName "since"
     let pAtom = Atom p vterms
@@ -272,25 +267,27 @@ transformStep2 cond r otherConds = case cond of
            , Rule [CPrev (CAtom pAtom), a] (RAtom pAtom)
            ]
   CAfter a b -> do
-    -- "a after b" means: b held at some past time, and a holds at some point
-    -- after b. The auxiliary tracks that b has occurred; a is checked directly.
-    let allVars = Set.toList $ Set.unions
-          [fvCond a, fvCond b, Set.unions (map fvCond otherConds), fvResult r]
+    -- Paper step 2(4): p is established by a and remains true until b.
+    -- Thus "a after b" records that a is the more recent event (with a
+    -- winning when both hold in the same world).
+    let allVars = Set.toList (Set.union (fvCond a) (fvCond b))
         vterms = varsToTerms allVars
     p <- freshName "after"
     let pAtom = Atom p vterms
         pCond = CAtom pAtom
-    return [ Rule (pCond : a : otherConds) r
-           , Rule [b] (RAtom pAtom)
-           , Rule [CPrev (CAtom pAtom)] (RAtom pAtom)
+    return [ Rule (pCond : otherConds) r
+           , Rule [a] (RAtom pAtom)
+           , Rule [CPrev (CAtom pAtom), CNeg b] (RAtom pAtom)
            ]
   CEventually a -> transformStep2 (COnce a) r otherConds
   CFor a n -> do
-    let expanded = [nestPrev i a | i <- [0..n-1]]
-    return [Rule (expanded ++ otherConds) r]
+    if n <= 0
+      then throwError "The right operand of 'for' must be a positive integer"
+      else do
+        let expanded = [nestPrev i a | i <- [0..n-1]]
+        return [Rule (expanded ++ otherConds) r]
   CNeg inner | hasStep2Op inner -> do
-    let allVars = Set.toList $ Set.unions
-          [fvCond inner, Set.unions (map fvCond otherConds), fvResult r]
+    let allVars = Set.toList (fvCond inner)
         vterms = varsToTerms allVars
     p <- freshName "neg"
     let pAtom = Atom p vterms
@@ -298,8 +295,7 @@ transformStep2 cond r otherConds = case cond of
     innerRules <- transformStep2 inner (RAtom pAtom) []
     return $ Rule (CNeg pCond : otherConds) r : innerRules
   CPrev inner | hasStep2Op inner -> do
-    let allVars = Set.toList $ Set.unions
-          [fvCond inner, Set.unions (map fvCond otherConds), fvResult r]
+    let allVars = Set.toList (fvCond inner)
         vterms = varsToTerms allVars
     p <- freshName "prev"
     let pAtom = Atom p vterms
@@ -313,96 +309,54 @@ nestPrev 0 c = c
 nestPrev n c = CPrev (nestPrev (n-1) c)
 
 -- ============================================================
--- Eliminate term-level TPrev by converting to condition-level CPrev
+-- Eliminate term-level TPrev after pattern-function expansion
 -- ============================================================
 
--- | Handles mixed TPrev depths via auxiliary predicates.
+-- | Paper step 3 first turns every pattern-function occurrence below a
+-- term-level @ into a predicate condition with the corresponding condition
+-- depth.  Once those conditions have been emitted, all @ operators still
+-- attached to terms are erased (paper p. 316).
 eliminateTermPrevM :: [Rule] -> FreshM [Rule]
-eliminateTermPrevM rules = do
-  results <- mapM eliminateTermPrevRuleM rules
-  return (concat results)
+eliminateTermPrevM = return . map stripRuleTermPrev
 
-eliminateTermPrevRuleM :: Rule -> FreshM [Rule]
-eliminateTermPrevRuleM (Fact (RAtom a)) =
-  case maxTermPrevInAtom a of
-    0 -> return [Fact (RAtom a)]
-    _ -> throwError $ "TPrev in head atom not allowed: " ++ show a
-eliminateTermPrevRuleM (Fact r) = return [Fact r]
-eliminateTermPrevRuleM (Rule conds result) =
-  case result of
-    RAtom a | maxTermPrevInAtom a > 0 ->
-      throwError $ "TPrev in head atom not allowed: " ++ show a
-    _ -> do
-      results <- mapM liftTermPrevM conds
-      let (conds', ruleLists) = unzip results
-      return (Rule conds' result : concat ruleLists)
+stripRuleTermPrev :: Rule -> Rule
+stripRuleTermPrev (Fact r) = Fact (stripResultTermPrev r)
+stripRuleTermPrev (Rule cs r) =
+  Rule (map stripCondTermPrev cs) (stripResultTermPrev r)
 
-liftTermPrevM :: Cond -> FreshM (Cond, [Rule])
-liftTermPrevM (CAtom (Atom name terms)) = do
-  let depths = map termPrevDepth terms
-      maxD = maximum (0 : depths)
-  if maxD == 0
-    then return (CAtom (Atom name terms), [])
-    else if all (== maxD) depths
-      then let terms' = map (stripTermPrevN maxD) terms
-           in return (nestCPrev maxD (CAtom (Atom name terms')), [])
-      else decomposeMixedDepths name terms depths
-liftTermPrevM (CPrev c) = do
-  (c', rules) <- liftTermPrevM c
-  return (CPrev c', rules)
-liftTermPrevM (CNeg c) = do
-  (c', rules) <- liftTermPrevM c
-  return (CNeg c', rules)
-liftTermPrevM (CAnd cs) = do
-  results <- mapM liftTermPrevM cs
-  let (cs', ruleLists) = unzip results
-  return (CAnd cs', concat ruleLists)
-liftTermPrevM c = return (c, [])
+stripResultTermPrev :: Result -> Result
+stripResultTermPrev (RAtom a) = RAtom (stripAtomTermPrev a)
+stripResultTermPrev (RPatternFunc f args body) =
+  RPatternFunc f (map stripTermPrev args) (stripTermPrev body)
+stripResultTermPrev (RAlways r) = RAlways (stripResultTermPrev r)
+stripResultTermPrev (RUntil r c) =
+  RUntil (stripResultTermPrev r) (stripCondTermPrev c)
+stripResultTermPrev (RAtNext r c) =
+  RAtNext (stripResultTermPrev r) (stripCondTermPrev c)
+stripResultTermPrev (RAnd rs) = RAnd (map stripResultTermPrev rs)
+stripResultTermPrev (RNext r) = RNext (stripResultTermPrev r)
 
-decomposeMixedDepths :: Name -> [Term] -> [Int] -> FreshM (Cond, [Rule])
-decomposeMixedDepths name terms depths = do
-  let minD = minimum depths
-      adjusted = map (\t -> stripTermPrevN minD t) terms
-      adjustedDepths = map (\d -> d - minD) depths
-  if all (== 0) adjustedDepths
-    then return (nestCPrev minD (CAtom (Atom name adjusted)), [])
-    else do
-      let indexed = zip3 [0..] adjusted adjustedDepths
-          nonZeroDs = Set.toList $ Set.fromList $ filter (> 0) adjustedDepths
-      auxResults <- mapM (\d -> do
-            let indicesAtD = [i | (i, _, dd) <- indexed, dd == d]
-                strippedTerms = [stripTermPrevN d (adjusted !! i) | i <- indicesAtD]
-            auxName <- freshName (name ++ "_d" ++ show d)
-            let auxCond = nestCPrev d (CAtom (Atom auxName strippedTerms))
-            let freshVars = [TVar ("_TP" ++ show i) | i <- [0..length terms - 1]]
-                projArgs = [freshVars !! i | i <- indicesAtD]
-                auxRule = Rule [CAtom (Atom name freshVars)] (RAtom (Atom auxName projArgs))
-            return (auxCond, auxRule)
-          ) nonZeroDs
-      let baseTerms = [stripTermPrevN d t | (_, t, d) <- indexed]
-          mainCond = CAtom (Atom name baseTerms)
-          allConds = mainCond : map fst auxResults
-          combined = CAnd allConds
-          wrappedCond = nestCPrev minD combined
-          allRules = map snd auxResults
-      return (wrappedCond, allRules)
+stripCondTermPrev :: Cond -> Cond
+stripCondTermPrev (CAtom a) = CAtom (stripAtomTermPrev a)
+stripCondTermPrev (CNeg c) = CNeg (stripCondTermPrev c)
+stripCondTermPrev (CPrev c) = CPrev (stripCondTermPrev c)
+stripCondTermPrev (CHasBeen c) = CHasBeen (stripCondTermPrev c)
+stripCondTermPrev (COnce c) = COnce (stripCondTermPrev c)
+stripCondTermPrev (CSince c d) =
+  CSince (stripCondTermPrev c) (stripCondTermPrev d)
+stripCondTermPrev (CAfter c d) =
+  CAfter (stripCondTermPrev c) (stripCondTermPrev d)
+stripCondTermPrev (CFor c n) = CFor (stripCondTermPrev c) n
+stripCondTermPrev (CAnd cs) = CAnd (map stripCondTermPrev cs)
+stripCondTermPrev (CEventually c) = CEventually (stripCondTermPrev c)
 
-termPrevDepth :: Term -> Int
-termPrevDepth (TPrev t) = 1 + termPrevDepth t
-termPrevDepth _ = 0
+stripAtomTermPrev :: Atom -> Atom
+stripAtomTermPrev (Atom p ts) = Atom p (map stripTermPrev ts)
 
-maxTermPrevInAtom :: Atom -> Int
-maxTermPrevInAtom (Atom _ terms) = maximum (0 : map maxTermPrevInTerm terms)
-
-maxTermPrevInTerm :: Term -> Int
-maxTermPrevInTerm (TPrev t) = 1 + maxTermPrevInTerm t
-maxTermPrevInTerm (TFun _ ts) = maximum (0 : map maxTermPrevInTerm ts)
-maxTermPrevInTerm _ = 0
-
-stripTermPrevN :: Int -> Term -> Term
-stripTermPrevN 0 t = t
-stripTermPrevN n (TPrev t) = stripTermPrevN (n-1) t
-stripTermPrevN _ t = t
+stripTermPrev :: Term -> Term
+stripTermPrev (TVar v) = TVar v
+stripTermPrev (TFun f ts) = TFun f (map stripTermPrev ts)
+stripTermPrev (TPrev t) = stripTermPrev t
 
 nestCPrev :: Int -> Cond -> Cond
 nestCPrev 0 c = c
@@ -413,11 +367,38 @@ nestCPrev n c = CPrev (nestCPrev (n-1) c)
 -- ============================================================
 
 step3 :: [PatternFunc] -> [Rule] -> FreshM [Rule]
-step3 [] rules = return rules
 step3 pfs rules = do
   let pfRules = map patternFuncToRule pfs
-      pfNames = Set.fromList [n | PatternFunc n _ _ <- pfs]
-  expandRulesFixpoint pfNames (pfRules ++ rules)
+      declaredNames = Set.fromList [n | PatternFunc n _ _ <- pfs]
+      conditionalNames = Set.fromList (concatMap rulePatternFuncNames rules)
+      pfNames = Set.union declaredNames conditionalNames
+      rules' = map lowerPatternFuncResult rules
+  if Set.null pfNames
+    then return rules'
+    else expandRulesFixpoint pfNames (pfRules ++ rules')
+
+-- Step 3's first substep also applies to reductions in implication heads.
+-- Step 1 has already exposed every result conjunction, so reductions are
+-- direct rule heads here.
+rulePatternFuncNames :: Rule -> [Name]
+rulePatternFuncNames (Fact r) = resultPatternFuncNames r
+rulePatternFuncNames (Rule _ r) = resultPatternFuncNames r
+
+resultPatternFuncNames :: Result -> [Name]
+resultPatternFuncNames (RPatternFunc f _ _) = [f]
+resultPatternFuncNames (RAlways r) = resultPatternFuncNames r
+resultPatternFuncNames (RUntil r _) = resultPatternFuncNames r
+resultPatternFuncNames (RAtNext r _) = resultPatternFuncNames r
+resultPatternFuncNames (RAnd rs) = concatMap resultPatternFuncNames rs
+resultPatternFuncNames (RNext r) = resultPatternFuncNames r
+resultPatternFuncNames (RAtom _) = []
+
+lowerPatternFuncResult :: Rule -> Rule
+lowerPatternFuncResult (Fact (RPatternFunc f args body)) =
+  Fact (RAtom (Atom f (args ++ [body])))
+lowerPatternFuncResult (Rule cs (RPatternFunc f args body)) =
+  Rule cs (RAtom (Atom f (args ++ [body])))
+lowerPatternFuncResult rule = rule
 
 patternFuncToRule :: PatternFunc -> Rule
 patternFuncToRule (PatternFunc f args body) =
@@ -515,15 +496,14 @@ needsStep4 (Fact _) = False
 needsStep4 (Rule cs _) = any needsStep4Cond cs
 
 needsStep4Cond :: Cond -> Bool
-needsStep4Cond (CNeg c)  = not (isAtomOrPrevAtom c)
+needsStep4Cond (CNeg c)  = not (isAtomCond c)
 needsStep4Cond (CPrev c) = needsStep4Cond c
 needsStep4Cond (CAnd cs) = any needsStep4Cond cs
 needsStep4Cond _         = False
 
-isAtomOrPrevAtom :: Cond -> Bool
-isAtomOrPrevAtom (CAtom _) = True
-isAtomOrPrevAtom (CPrev c) = isAtomOrPrevAtom c
-isAtomOrPrevAtom _         = False
+isAtomCond :: Cond -> Bool
+isAtomCond (CAtom _) = True
+isAtomCond _         = False
 
 step4Rule :: Rule -> FreshM [Rule]
 step4Rule (Rule cs r) = do
@@ -533,7 +513,7 @@ step4Rule (Rule cs r) = do
 step4Rule rule = return [rule]
 
 step4Cond :: Cond -> FreshM (Cond, [Rule])
-step4Cond (CNeg inner) | not (isAtomOrPrevAtom inner) = do
+step4Cond (CNeg inner) | not (isAtomCond inner) = do
   let vs = Set.toList (fvCond inner)
       vterms = varsToTerms vs
   p <- freshName "neg"
@@ -542,6 +522,10 @@ step4Cond (CNeg inner) | not (isAtomOrPrevAtom inner) = do
 step4Cond (CPrev c) = do
   (c', extras) <- step4Cond c
   return (CPrev c', extras)
+step4Cond (CAnd cs) = do
+  results <- mapM step4Cond cs
+  let (cs', extraRules) = unzip results
+  return (CAnd cs', concat extraRules)
 step4Cond c = return (c, [])
 
 -- ============================================================
@@ -598,14 +582,19 @@ toNormalCond = go 0 False
 --   or @Right ((program, pfNames), warnings)@ on success.
 normalize :: Program -> Either String ((NormalProgram, Set.Set Name), [String])
 normalize (Program rules pfs) =
-  let pfNames = Set.fromList [n | PatternFunc n _ _ <- pfs]
-      (result, _) = runState (runExceptT pipeline) (FreshNameGen 0)
+  let declaredNames = Set.fromList [n | PatternFunc n _ _ <- pfs]
+      conditionalNames = Set.fromList (concatMap rulePatternFuncNames rules)
+      pfNames = Set.union declaredNames conditionalNames
+      usedIdentifiers = Set.unions
+        (map ruleIdentifiers rules ++ map patternFuncIdentifiers pfs)
+      (result, _) = runState (runExceptT pipeline)
+        (FreshNameGen (freshStart usedIdentifiers))
       pipeline = do
         r1 <- step1 rules
         r2 <- step2 r1
-        r2' <- eliminateTermPrevM r2
-        r3 <- step3 pfs r2'
-        r4 <- step4 r3
+        r3 <- step3 pfs r2
+        r3' <- eliminateTermPrevM r3
+        r4 <- step4 r3'
         let r5 = step5 r4
         let normals = map toNormalRule r5
         case sequence normals of
@@ -616,14 +605,77 @@ normalize (Program rules pfs) =
                                   unlines [show r | r <- r5]
   in result
 
--- | Validate that every variable in a negated condition (at depth 0)
+freshStart :: Set.Set String -> Int
+freshStart identifiers =
+  case [n | identifier <- Set.toList identifiers, Just n <- [auxSuffix identifier]] of
+    [] -> 0
+    ns -> maximum ns + 1
+
+auxSuffix :: String -> Maybe Int
+auxSuffix identifier =
+  let (digitsReversed, restReversed) = span isAsciiDigit (reverse identifier)
+  in if null digitsReversed || take 4 restReversed /= "xua_"
+       then Nothing
+       else case reads (reverse digitsReversed) of
+         [(n, "")] -> Just n
+         _ -> Nothing
+  where
+    isAsciiDigit c = c >= '0' && c <= '9'
+
+ruleIdentifiers :: Rule -> Set.Set String
+ruleIdentifiers (Fact r) = resultIdentifiers r
+ruleIdentifiers (Rule cs r) =
+  Set.union (Set.unions (map condIdentifiers cs)) (resultIdentifiers r)
+
+patternFuncIdentifiers :: PatternFunc -> Set.Set String
+patternFuncIdentifiers (PatternFunc f args body) =
+  Set.insert f (Set.unions (map termIdentifiers (body : args)))
+
+resultIdentifiers :: Result -> Set.Set String
+resultIdentifiers (RAtom a) = atomIdentifiers a
+resultIdentifiers (RPatternFunc f args body) =
+  Set.insert f (Set.unions (map termIdentifiers (body : args)))
+resultIdentifiers (RAlways r) = resultIdentifiers r
+resultIdentifiers (RUntil r c) =
+  Set.union (resultIdentifiers r) (condIdentifiers c)
+resultIdentifiers (RAtNext r c) =
+  Set.union (resultIdentifiers r) (condIdentifiers c)
+resultIdentifiers (RAnd rs) = Set.unions (map resultIdentifiers rs)
+resultIdentifiers (RNext r) = resultIdentifiers r
+
+condIdentifiers :: Cond -> Set.Set String
+condIdentifiers (CAtom a) = atomIdentifiers a
+condIdentifiers (CNeg c) = condIdentifiers c
+condIdentifiers (CPrev c) = condIdentifiers c
+condIdentifiers (CHasBeen c) = condIdentifiers c
+condIdentifiers (COnce c) = condIdentifiers c
+condIdentifiers (CSince c d) =
+  Set.union (condIdentifiers c) (condIdentifiers d)
+condIdentifiers (CAfter c d) =
+  Set.union (condIdentifiers c) (condIdentifiers d)
+condIdentifiers (CFor c _) = condIdentifiers c
+condIdentifiers (CAnd cs) = Set.unions (map condIdentifiers cs)
+condIdentifiers (CEventually c) = condIdentifiers c
+
+atomIdentifiers :: Atom -> Set.Set String
+atomIdentifiers (Atom p ts) =
+  Set.insert p (Set.unions (map termIdentifiers ts))
+
+termIdentifiers :: Term -> Set.Set String
+termIdentifiers (TVar v) = Set.singleton v
+termIdentifiers (TFun f ts) =
+  Set.insert f (Set.unions (map termIdentifiers ts))
+termIdentifiers (TPrev t) = termIdentifiers t
+
+-- | Validate that every variable in a negated condition (at any depth)
 -- is bound by at least one positive condition in the same rule.
 validateSafety :: NormalProgram -> [String]
 validateSafety = concatMap checkRule
   where
     checkRule rule =
       let posVars = Set.unions [fvAtom (ncAtom c) | c <- nrConditions rule, not (ncNegated c)]
-          negVars = Set.unions [fvAtom (ncAtom c) | c <- nrConditions rule, ncNegated c, ncPrevDepth c == 0]
+          negVars = Set.unions
+            [fvAtom (ncAtom c) | c <- nrConditions rule, ncNegated c]
           unsafeVars = negVars `Set.difference` posVars
       in if Set.null unsafeVars
          then []

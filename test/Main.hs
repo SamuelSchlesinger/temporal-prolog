@@ -147,6 +147,12 @@ parserSpec = describe "Parser" $ do
       Right p -> length (progPatternFuncs p) `shouldBe` 1
       Left _ -> expectationFailure "Failed to parse pattern function"
 
+  it "parses conditional pattern-function reductions from the paper" $ do
+    parseRule "<test>" "enabled(X) => choose(X) -> selected."
+      `shouldBe` Right
+        (Rule [CAtom (Atom "enabled" [TVar "X"])]
+          (RPatternFunc "choose" [TVar "X"] (TFun "selected" [])))
+
   it "rejects keywords as predicate names" $ do
     parseAtom "<test>" "since" `shouldSatisfy` isLeft
 
@@ -164,16 +170,54 @@ normalizerSpec = describe "Normalizer" $ do
     let np = parseAndNormalize "a => b."
     length np `shouldBe` 1
 
-  it "expands always into auxiliary rules" $ do
+  it "reduces an unconditional always result to the bare result (paper step 1(2))" $ do
     let np = parseAndNormalize "always p."
-    -- always p -> p, @aux => aux, aux => p (3 rules)
-    length np `shouldSatisfy` (>= 3)
+    np `shouldBe` [NormalRule [] (Atom "p" [])]
+
+  it "uses only result variables in a conditional always auxiliary" $ do
+    let np = parseAndNormalize "start(X) => always running."
+        auxHeads = [args | NormalRule _ (Atom name args) <- np, name == "always_aux0"]
+    auxHeads `shouldSatisfy` (not . null)
+    auxHeads `shouldSatisfy` all null
+
+  it "does not collide generated predicates with source identifiers" $ do
+    let np = parseAndNormalize $ unlines
+          [ "always_aux0."
+          , "start => always running."
+          ]
+        generatedNames =
+          [ name
+          | NormalRule _ (Atom name _) <- np
+          , name /= "always_aux0"
+          , name /= "running"
+          ]
+    generatedNames `shouldSatisfy` (not . null)
+    generatedNames `shouldSatisfy` all (/= "always_aux0")
+
+  it "reduces an unconditional atnext result to its trigger rule (paper step 1(4))" $ do
+    let np = parseAndNormalize "ready atnext trigger."
+    np `shouldBe`
+      [NormalRule [NormalCond 0 False (Atom "trigger" [])] (Atom "ready" [])]
+
+  it "uses the previous trigger value in the until recurrence" $ do
+    let np = parseAndNormalize "start => running until stop."
+        recurrenceConds =
+          [ cs
+          | NormalRule cs (Atom name []) <- np
+          , name == "until_aux0"
+          , any ((== 1) . ncPrevDepth) cs
+          ]
+    recurrenceConds `shouldSatisfy` any
+      (elem (NormalCond 1 True (Atom "stop" [])))
 
   it "expands for into repeated @" $ do
     let np = parseAndNormalize "a for 3 => b."
     -- a for 3 expands to a /\ @a /\ @@a
     let hasDepth2 = any (\r -> any (\c -> ncPrevDepth c == 2) (nrConditions r)) np
     hasDepth2 `shouldBe` True
+
+  it "rejects zero repetitions for 'for'" $ do
+    parseCond "<test>" "a for 0" `shouldSatisfy` isLeft
 
   it "normalizes programs with negation" $ do
     let np = parseAndNormalize "~a => b."
@@ -193,6 +237,14 @@ normalizerSpec = describe "Normalizer" $ do
     -- All rules should have NormalCond with proper structure
     let allNormal = all (\r -> all (\c -> ncPrevDepth c >= 0) (nrConditions r)) np
     allNormal `shouldBe` True
+
+  it "normalizes temporal operators exposed inside nested conjunctions" $ do
+    let np = parseAndNormalize "#(a /\\ (b since c)) => result."
+    np `shouldSatisfy` (not . null)
+
+  it "pushes negation inside conjunctions exposed by temporal expansion" $ do
+    let np = parseAndNormalize "#(~(a /\\ b) /\\ c) => result."
+    np `shouldSatisfy` (not . null)
 
 interpreterSpec :: Spec
 interpreterSpec = describe "Interpreter" $ do
@@ -251,6 +303,23 @@ interpreterSpec = describe "Interpreter" $ do
     let st = runWithAssertions prog [(0, ["p"])] 1
     -- @p at world 0 should fail
     worldContains st "q" `shouldBe` False
+
+  it "distinguishes @~p from ~@p at world 0" $ do
+    let innerNeg = runWithAssertions "@~p => inner_neg.\n" [] 1
+        outerNeg = runWithAssertions "~@p => outer_neg.\n" [] 1
+    -- Section 5.2 defines @F as false at world 0 for every F.
+    worldContains innerNeg "inner_neg" `shouldBe` False
+    -- Step 4 preserves the outer negation with an auxiliary predicate.
+    worldContains outerNeg "outer_neg" `shouldBe` True
+
+  it "evaluates @~p normally once the previous world exists" $ do
+    let st = runWithAssertions "@~p => absent_before.\n" [] 2
+    worldContains st "absent_before" `shouldBe` True
+
+  it "does not capture surrounding variables in has-been auxiliaries" $ do
+    let prog = "#ready /\\ item(X) => result(X).\n"
+        st = runWithAssertions prog [(0, ["ready", "item(a)"])] 1
+    worldContains st "result(a)" `shouldBe` True
 
   it "mutual exclusion" $ do
     let prog = unlines
@@ -369,6 +438,30 @@ patternFunctionSpec = describe "Pattern function expansion" $ do
     let NormalRule _ (Atom _ args) = head wrapRules
     length args `shouldBe` 2
 
+  it "normalizes and executes a conditional pattern-function reduction" $ do
+    let prog = unlines
+          [ "enabled(X) => choose(X) -> selected."
+          , "request(X) /\\ choose(X) = Y => result(Y)."
+          ]
+        (np, pfNames) = parseAndNormalizeWithPF prog
+        chooseRules =
+          [ r | r@(NormalRule _ (Atom "choose" _)) <- np ]
+        st = runWithAssertions prog
+          [(0, ["enabled(a)", "request(a)"])] 1
+    Set.member "choose" pfNames `shouldBe` True
+    chooseRules `shouldSatisfy` (not . null)
+    worldContains st "result(selected)" `shouldBe` True
+
+  it "makes @~ false at world 0 inside conditional pattern functions" $ do
+    let prog = unlines
+          [ "@~blocked(X) => choose(X) -> selected."
+          , "request(X) /\\ choose(X) = Y => result(Y)."
+          ]
+        st0 = runWithAssertions prog [(0, ["request(a)"])] 1
+        st1 = unsafeStep (assertFact (Atom "request" [TFun "a" []]) st0)
+    worldContains st0 "result(selected)" `shouldBe` False
+    worldContains st1 "result(selected)" `shouldBe` True
+
 -- ============================================================
 -- H. Unification = and at(X)
 -- ============================================================
@@ -427,11 +520,10 @@ stratificationSpec = describe "Stratification" $ do
     let np = parseAndNormalize "~a => a.\n"
     stepWorld (newInterpreterState np Set.empty) `shouldSatisfy` isLeft
 
-  it "@~a => b: @ excludes from dependency graph, should succeed" $ do
+  it "@~a => b: @ excludes from dependency graph but is false at world 0" $ do
     let prog = "@~a => b.\n"
     let st = runWithAssertions prog [] 1
-    -- At world 0, @~a is true (no previous world, negation of absent = true)
-    worldContains st "b" `shouldBe` True
+    worldContains st "b" `shouldBe` False
 
 -- ============================================================
 -- J. Safety validation
@@ -440,18 +532,18 @@ stratificationSpec = describe "Stratification" $ do
 safetyValidationSpec :: Spec
 safetyValidationSpec = describe "Safety validation" $ do
   it "~p(X) => q(X) normalizes (warns about X)" $ do
-    let Right ((np, _), warnings) = case parseProgram "<test>" "~p(X) => q(X).\n" of
-          Right prog -> normalize prog
-          Left err -> error $ show err
+    let (np, warnings) = normalizeWithWarnings "~p(X) => q(X).\n"
     length np `shouldSatisfy` (>= 1)
     length warnings `shouldSatisfy` (>= 1)
 
   it "r(X) /\\ ~p(X) => q(X) normalizes without warnings" $ do
-    let Right ((np, _), warnings) = case parseProgram "<test>" "r(X) /\\ ~p(X) => q(X).\n" of
-          Right prog -> normalize prog
-          Left err -> error $ show err
+    let (np, warnings) = normalizeWithWarnings "r(X) /\\ ~p(X) => q(X).\n"
     length np `shouldSatisfy` (>= 1)
     warnings `shouldBe` []
+
+  it "warns about unbound variables in previous-world negation" $ do
+    let (_, warnings) = normalizeWithWarnings "@~p(X) => q(X).\n"
+    warnings `shouldSatisfy` (not . null)
 
 -- ============================================================
 -- K-M. Edge cases
@@ -483,46 +575,32 @@ edgeCaseSpec = describe "Edge cases" $ do
     worldContains st "q(a)" `shouldBe` True
 
 -- ============================================================
--- N. Mixed TPrev depths
+-- N. Term-level previous values in pattern-function expansion
 -- ============================================================
 
 mixedTPrevSpec :: Spec
-mixedTPrevSpec = describe "Mixed TPrev depths" $ do
-  it "p(@X, Y) normalizes without error" $ do
-    -- Previously this would error with "Mixed TPrev depths..."
-    let np = parseAndNormalize "p(@X, Y) => q(X, Y)."
-    length np `shouldSatisfy` (> 0)
-
-  it "p(@X, @@Y) normalizes without error" $ do
-    let np = parseAndNormalize "p(@X, @@Y) => q(X, Y)."
-    length np `shouldSatisfy` (> 0)
-
-  it "p(@X, Y, @@Z) normalizes without error" $ do
-    let np = parseAndNormalize "p(@X, Y, @@Z) => q(X, Y, Z)."
-    length np `shouldSatisfy` (> 0)
-
-  it "mixed depths end-to-end: p(@X, X) matches across worlds" $ do
-    -- p(@X, X) means: match p(a, b) in the current world where
-    -- a appeared in p's first argument at the previous world, and b = X.
-    -- World 0: assert p(hello, hello) -> projection aux derives
-    -- World 1: assert p(hello, hello) -> @aux(hello) succeeds, p(hello, hello) matches
-    let prog = unlines
-          [ "p(@X, X) => matched(X)."
+mixedTPrevSpec = describe "Term-level previous pattern-function values" $ do
+  it "moves @ from a pattern-function value to the generated PF condition" $ do
+    let np = parseAndNormalize $ unlines
+          [ "lookup(key) -> value."
+          , "present(@lookup(key)) => found."
           ]
-    let st = runWithAssertions prog [(0, ["p(hello, hello)"]), (1, ["p(hello, hello)"])] 2
-    worldContains st "matched(hello)" `shouldBe` True
+        foundRuleConds =
+          [ cs | NormalRule cs (Atom "found" []) <- np ]
+    foundRuleConds `shouldSatisfy` any
+      (elem (NormalCond 0 False (Atom "present" [TVar "V_aux0"])))
+    foundRuleConds `shouldSatisfy` any
+      (elem (NormalCond 1 False
+        (Atom "lookup" [TFun "key" [], TVar "V_aux0"])))
 
-  it "mixed depths: depth-0 only args still work" $ do
-    -- If all depths happen to be 0, it should still work fine
-    let prog = "p(X, Y) => q(X, Y)."
-    let st = runWithAssertions prog [(0, ["p(a, b)"])] 1
-    worldContains st "q(a, b)" `shouldBe` True
-
-  it "mixed depths: uniform non-zero depths still work" $ do
-    -- If all depths are the same non-zero value, the existing logic handles it
-    let prog = "@p(X, Y) => q(X, Y)."
-    let st = runWithAssertions prog [(0, ["p(a, b)"])] 2
-    worldContains st "q(a, b)" `shouldBe` True
+  it "uses the enclosing predicate in the current world" $ do
+    let prog = unlines
+          [ "lookup(key) -> value."
+          , "present(@lookup(key)) => found."
+          ]
+        st = runWithAssertions prog [(1, ["present(value)"])] 2
+    -- The generated lookup condition is previous-time; present(value) is not.
+    worldContains st "found" `shouldBe` True
 
 -- ============================================================
 -- O. Backward chaining for pattern functions
@@ -767,16 +845,20 @@ correctnessAndFeatureSpec = describe "Temporal operator semantics, parser extens
 
   -- Precedence: since/after lower than /\
   it "a /\\ b since c parses as (a /\\ b) since c" $ do
-    let Right cond = parseCond "<test>" "a /\\ b since c"
-    case cond of
-      CSince (CAnd [CAtom (Atom "a" []), CAtom (Atom "b" [])]) (CAtom (Atom "c" [])) -> return ()
-      _ -> expectationFailure $ "Wrong parse: expected (a /\\ b) since c, got: " ++ show cond
+    case parseCond "<test>" "a /\\ b since c" of
+      Right (CSince (CAnd [CAtom (Atom "a" []), CAtom (Atom "b" [])])
+                    (CAtom (Atom "c" []))) -> return ()
+      Right cond -> expectationFailure $
+        "Wrong parse: expected (a /\\ b) since c, got: " ++ show cond
+      Left err -> expectationFailure $ "Parse error: " ++ show err
 
   it "a since b /\\ c parses as a since (b /\\ c)" $ do
-    let Right cond = parseCond "<test>" "a since b /\\ c"
-    case cond of
-      CSince (CAtom (Atom "a" [])) (CAnd [CAtom (Atom "b" []), CAtom (Atom "c" [])]) -> return ()
-      _ -> expectationFailure $ "Wrong parse: expected a since (b /\\ c), got: " ++ show cond
+    case parseCond "<test>" "a since b /\\ c" of
+      Right (CSince (CAtom (Atom "a" []))
+                    (CAnd [CAtom (Atom "b" []), CAtom (Atom "c" [])])) -> return ()
+      Right cond -> expectationFailure $
+        "Wrong parse: expected a since (b /\\ c), got: " ++ show cond
+      Left err -> expectationFailure $ "Parse error: " ++ show err
 
   -- Tracing uses recorded provenance
   it "traceDerivations returns provenance for derived facts" $ do
@@ -795,28 +877,27 @@ correctnessAndFeatureSpec = describe "Temporal operator semantics, parser extens
     Set.member (Atom "p" [TFun "a" []]) ps `shouldBe` True
     Set.member (Atom "q" [TFun "b" []]) ps `shouldBe` False
 
-  -- CAfter semantics: "a after b" means b happened, then a holds
-  it "after operator: monitoring after restart fires when restart happened then monitoring holds" $ do
+  -- Paper step 2(4): a after b is established by a and persists until b.
+  it "after operator is established by its left event" $ do
     let prog = unlines
           [ "monitoring after restart => check_system."
           ]
-    -- World 0: only restart, no monitoring — shouldn't fire
-    let st0 = runWithAssertions prog [(0, ["restart"])] 1
-    worldContains st0 "check_system" `shouldBe` False
-    -- World 1: monitoring holds, restart happened in the past — should fire
-    let st1 = assertFact (Atom "monitoring" []) st0
-        st2 = unsafeStep st1
-    worldContains st2 "check_system" `shouldBe` True
-
-  it "after operator: does not fire if b never happened" $ do
-    let prog = unlines
-          [ "monitoring after restart => check_system."
-          ]
-    -- monitoring without restart — should NOT fire
     let st = runWithAssertions prog [(0, ["monitoring"])] 1
-    worldContains st "check_system" `shouldBe` False
+    worldContains st "check_system" `shouldBe` True
 
-  it "after operator: fires same world when both a and b hold" $ do
+  it "after operator persists until the right event" $ do
+    let prog = unlines
+          [ "monitoring after restart => check_system."
+          ]
+        st0 = runWithAssertions prog [(0, ["monitoring"])] 1
+        st1 = unsafeStep st0
+        st2 = unsafeStep (assertFact (Atom "restart" []) st1)
+        st3 = unsafeStep st2
+    worldContains st1 "check_system" `shouldBe` True
+    worldContains st2 "check_system" `shouldBe` False
+    worldContains st3 "check_system" `shouldBe` False
+
+  it "after operator: its left event wins when both events hold" $ do
     let prog = unlines
           [ "a after b => result."
           ]
@@ -846,3 +927,10 @@ isInternal (Atom n _) = "_aux" `isInfixOfName` n
         isPrefixOfName (x:xs) (y:ys) = x == y && isPrefixOfName xs ys
         tails [] = [[]]
         tails xs@(_:xs') = xs : tails xs'
+
+normalizeWithWarnings :: String -> (NormalProgram, [String])
+normalizeWithWarnings src = case parseProgram "<test>" src of
+  Left err -> error $ "Parse error: " ++ show err
+  Right prog -> case normalize prog of
+    Left err -> error $ "Normalization error: " ++ err
+    Right ((np, _), warnings) -> (np, warnings)

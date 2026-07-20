@@ -66,6 +66,8 @@ ppCondAtom c            = "(" ++ ppCond c ++ ")"
 
 ppResult :: Result -> String
 ppResult (RAtom a)     = ppAtom a
+ppResult (RPatternFunc f args body) =
+  f ++ "(" ++ intercalate ", " (map ppTerm args) ++ ") -> " ++ ppTerm body
 ppResult (RAlways r)   = "always " ++ ppResultAtom r
 ppResult (RUntil r c)  = ppResultAtom r ++ " until " ++ ppCondAtom c
 ppResult (RAtNext r c) = ppResultAtom r ++ " atnext " ++ ppCondAtom c

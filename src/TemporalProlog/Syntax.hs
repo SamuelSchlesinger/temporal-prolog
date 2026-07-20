@@ -48,7 +48,7 @@ data Cond
   | CHasBeen Cond        -- #c  (has-been: true from start until now)
   | COnce Cond           -- ?c  (was true at some past time including now)
   | CSince Cond Cond     -- c since d
-  | CAfter Cond Cond     -- c after d
+  | CAfter Cond Cond     -- c after d (c occurred more recently than d)
   | CFor Cond Int        -- c for n
   | CAnd [Cond]          -- c1 /\ c2 /\ ...
   | CEventually Cond     -- eventually / ◇ (synonym for once in past-time)
@@ -56,12 +56,13 @@ data Cond
 
 -- | Result formulas (rule heads)
 data Result
-  = RAtom Atom           -- p(t1,...,tk)
-  | RAlways Result       -- always r  /  []r
-  | RUntil Result Cond   -- r until c
-  | RAtNext Result Cond  -- r atnext c
-  | RAnd [Result]        -- r1 /\ r2
-  | RNext Result          -- next / ○ (result holds at next time step)
+  = RAtom Atom                   -- p(t1,...,tk)
+  | RPatternFunc Name [Term] Term -- f(t1,...,tk) -> t0
+  | RAlways Result               -- always r  /  []r
+  | RUntil Result Cond           -- r until c
+  | RAtNext Result Cond          -- r atnext c
+  | RAnd [Result]                -- r1 /\ r2
+  | RNext Result                 -- next / ○ (result holds at next time step)
   deriving (Eq, Ord, Show)
 
 -- | A rule: condition => result, or a bare fact
@@ -181,6 +182,8 @@ applySubstCond s (CEventually c) = CEventually (applySubstCond s c)
 -- | Apply a substitution to a result
 applySubstResult :: Subst -> Result -> Result
 applySubstResult s (RAtom a)      = RAtom (applySubstAtom s a)
+applySubstResult s (RPatternFunc f args body) =
+  RPatternFunc f (map (applySubstTerm s) args) (applySubstTerm s body)
 applySubstResult s (RAlways r)    = RAlways (applySubstResult s r)
 applySubstResult s (RUntil r c)   = RUntil (applySubstResult s r) (applySubstCond s c)
 applySubstResult s (RAtNext r c)  = RAtNext (applySubstResult s r) (applySubstCond s c)
@@ -217,6 +220,8 @@ fvCond (CEventually c) = fvCond c
 -- | Free variables in a result
 fvResult :: Result -> Set Var
 fvResult (RAtom a)     = fvAtom a
+fvResult (RPatternFunc _ args body) =
+  Set.union (Set.unions (map fvTerm args)) (fvTerm body)
 fvResult (RAlways r)   = fvResult r
 fvResult (RUntil r c)  = Set.union (fvResult r) (fvCond c)
 fvResult (RAtNext r c) = Set.union (fvResult r) (fvCond c)
