@@ -77,6 +77,8 @@ are likewise internal and cannot be injected through assertion streams.
 
 Run `sh conformance/run.sh` to execute the positive and negative shared corpus
 through both binaries and fail on any output or acceptance mismatch.
+See [TESTING.md](TESTING.md) for the behavior-by-behavior coverage map and the
+distinction between repository-level and standalone-crate tests.
 
 Run `sh benchmarks/run.sh 100` for the matched digest-checked comparison.
 

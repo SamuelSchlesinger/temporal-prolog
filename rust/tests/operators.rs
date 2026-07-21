@@ -101,7 +101,18 @@ fn recursion_limit_and_range_errors_are_not_logical_failure() {
 #[test]
 fn arbitrary_precision_floor_division_and_invalid_arithmetic() {
     let mut state = Interpreter::new(
-        compile(include_str!("../../conformance/cases/arithmetic_edges.tpl")).unwrap(),
+        compile(
+            "Q1 is -7 div 3 => quotient_negative(Q1). \
+             R1 is -7 mod 3 => remainder_negative(R1). \
+             Q2 is 7 div -3 => quotient_negative_divisor(Q2). \
+             R2 is 7 mod -3 => remainder_negative_divisor(R2). \
+             P is 2 + 3 * 4 div 5 => precedence(P). \
+             Huge is 9223372036854775808 * 9223372036854775808 \
+               => arbitrary_precision(Huge). \
+             Bad is 1 div 0 => division_by_zero_succeeded(Bad). \
+             canonical_integer_spellings(007,-0).",
+        )
+        .unwrap(),
     );
     state.step().unwrap();
     assert!(contains(&state, "canonical_integer_spellings(7,0)"));

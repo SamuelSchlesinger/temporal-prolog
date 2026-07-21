@@ -197,3 +197,61 @@ impl fmt::Display for Atom {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn constant(name: &str) -> Term {
+        Term::Fun(name.into(), vec![])
+    }
+
+    #[test]
+    fn groundness_is_recursive() {
+        assert!(Term::Fun("box".into(), vec![constant("a")]).ground());
+        assert!(!Term::Fun("box".into(), vec![Term::Var("X".into())]).ground());
+        assert!(!Term::Prev(Box::new(Term::Var("X".into()))).ground());
+    }
+
+    #[test]
+    fn term_variables_are_collected_without_duplicates() {
+        let term = Term::Fun(
+            "pair".into(),
+            vec![
+                Term::Var("X".into()),
+                Term::Var("X".into()),
+                Term::Var("Y".into()),
+            ],
+        );
+        assert_eq!(term.vars(), ["X".into(), "Y".into()].into_iter().collect());
+    }
+
+    #[test]
+    fn substitutions_are_applied_transitively() {
+        let substitution = [
+            ("X".into(), Term::Var("Y".into())),
+            ("Y".into(), constant("a")),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(Term::Var("X".into()).apply(&substitution), constant("a"));
+    }
+
+    #[test]
+    fn atom_substitution_preserves_predicate_and_applies_arguments() {
+        let substitution = [("X".into(), constant("a"))].into_iter().collect();
+        assert_eq!(
+            Atom::new("p", vec![Term::Var("X".into())]).apply(&substitution),
+            Atom::new("p", vec![constant("a")])
+        );
+    }
+
+    #[test]
+    fn builtin_signatures_are_fixed() {
+        assert_eq!(external_predicate_arity("true"), Some(0));
+        assert_eq!(external_predicate_arity("at"), Some(1));
+        assert_eq!(external_predicate_arity("is"), Some(2));
+        assert_eq!(arithmetic_function_arity("div"), Some(2));
+        assert_eq!(external_predicate_arity("user_predicate"), None);
+    }
+}

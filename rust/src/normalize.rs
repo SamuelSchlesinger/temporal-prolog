@@ -1037,6 +1037,169 @@ mod tests {
     use super::*;
     use crate::parser::parse_program;
 
+    fn normalized(source: &str) -> NormalizedProgram {
+        normalize(parse_program(source).unwrap()).unwrap()
+    }
+
+    fn atom(name: &str) -> Atom {
+        Atom::new(name, vec![])
+    }
+
+    #[test]
+    fn normalizes_simple_facts() {
+        assert_eq!(
+            normalized("p.").rules,
+            vec![NormalRule {
+                conditions: vec![],
+                head: atom("p"),
+            }]
+        );
+    }
+
+    #[test]
+    fn normalizes_simple_rules() {
+        assert_eq!(
+            normalized("a => b.").rules,
+            vec![NormalRule {
+                conditions: vec![NormalCond {
+                    depth: 0,
+                    negated: false,
+                    atom: atom("a"),
+                }],
+                head: atom("b"),
+            }]
+        );
+    }
+
+    #[test]
+    fn unconditional_always_reduces_to_its_bare_result() {
+        assert_eq!(
+            normalized("always p.").rules,
+            vec![NormalRule {
+                conditions: vec![],
+                head: atom("p"),
+            }]
+        );
+    }
+
+    #[test]
+    fn conditional_always_auxiliary_uses_only_result_variables() {
+        let program = normalized("start(X) => always running.");
+        let auxiliary_heads: Vec<_> = program
+            .rules
+            .iter()
+            .filter(|rule| program.auxiliary_predicates.contains(&rule.head.name))
+            .map(|rule| &rule.head.terms)
+            .collect();
+        assert!(!auxiliary_heads.is_empty());
+        assert!(auxiliary_heads.iter().all(|terms| terms.is_empty()));
+    }
+
+    #[test]
+    fn generated_predicates_do_not_collide_with_source_names() {
+        let program = normalized("always_aux0. start => always running.");
+        assert!(!program.auxiliary_predicates.contains("always_aux0"));
+        assert!(program
+            .auxiliary_predicates
+            .iter()
+            .any(|name| name.starts_with("always_aux")));
+    }
+
+    #[test]
+    fn unconditional_atnext_reduces_to_trigger_rule() {
+        assert_eq!(
+            normalized("ready atnext trigger.").rules,
+            vec![NormalRule {
+                conditions: vec![NormalCond {
+                    depth: 0,
+                    negated: false,
+                    atom: atom("trigger"),
+                }],
+                head: atom("ready"),
+            }]
+        );
+    }
+
+    #[test]
+    fn until_recurrence_uses_previous_negated_trigger() {
+        let program = normalized("start => running until stop.");
+        assert!(program.rules.iter().any(|rule| {
+            program.auxiliary_predicates.contains(&rule.head.name)
+                && rule.conditions.iter().any(|condition| {
+                    condition.depth == 1 && condition.negated && condition.atom == atom("stop")
+                })
+        }));
+    }
+
+    #[test]
+    fn for_expands_to_every_required_previous_depth() {
+        let program = normalized("a for 3 => b.");
+        let rule = program
+            .rules
+            .iter()
+            .find(|rule| rule.head == atom("b"))
+            .unwrap();
+        let depths: BTreeSet<_> = rule
+            .conditions
+            .iter()
+            .map(|condition| condition.depth)
+            .collect();
+        assert_eq!(depths, [0, 1, 2].into_iter().collect());
+    }
+
+    #[test]
+    fn negation_becomes_a_negated_normal_condition() {
+        let program = normalized("~a => b.");
+        assert!(program.rules.iter().any(|rule| rule
+            .conditions
+            .iter()
+            .any(|condition| condition.negated && condition.atom == atom("a"))));
+    }
+
+    #[test]
+    fn pattern_function_relation_has_an_extra_output_argument() {
+        let program = normalized("wrap(X) -> box(X).");
+        let rule = program
+            .rules
+            .iter()
+            .find(|rule| rule.head.name == "wrap")
+            .unwrap();
+        assert_eq!(rule.head.terms.len(), 2);
+        assert!(program.pattern_functions.contains("wrap"));
+    }
+
+    #[test]
+    fn normalizes_temporal_operators_exposed_by_nested_conjunctions() {
+        assert!(!normalized("#(a /\\ (b since c)) => result.")
+            .rules
+            .is_empty());
+    }
+
+    #[test]
+    fn pushes_negation_through_exposed_conjunctions() {
+        assert!(!normalized("#(~(a /\\ b) /\\ c) => result.")
+            .rules
+            .is_empty());
+    }
+
+    #[test]
+    fn term_previous_moves_only_the_pattern_function_condition() {
+        let program = normalized("lookup(key) -> value. present(@lookup(key)) => found.");
+        let found = program
+            .rules
+            .iter()
+            .find(|rule| rule.head == atom("found"))
+            .unwrap();
+        assert!(found
+            .conditions
+            .iter()
+            .any(|condition| { condition.depth == 0 && condition.atom.name == "present" }));
+        assert!(found
+            .conditions
+            .iter()
+            .any(|condition| { condition.depth == 1 && condition.atom.name == "lookup" }));
+    }
+
     #[test]
     fn strict_after_uses_two_latches() {
         let normalized = normalize(parse_program("a after b => result.").unwrap()).unwrap();

@@ -1024,6 +1024,90 @@ mod tests {
         crate::parser::parse_atom(source).unwrap()
     }
 
+    fn constant(name: &str) -> Term {
+        Term::Fun(name.into(), vec![])
+    }
+
+    #[test]
+    fn unifies_identical_terms() {
+        assert_eq!(
+            unify_terms(&constant("a"), &constant("a")),
+            Some(Subst::new())
+        );
+    }
+
+    #[test]
+    fn unifies_a_variable_with_a_term() {
+        assert_eq!(
+            unify_terms(&Term::Var("X".into()), &constant("a")),
+            Some([("X".into(), constant("a"))].into_iter().collect())
+        );
+    }
+
+    #[test]
+    fn rejects_different_functors() {
+        assert_eq!(unify_terms(&constant("a"), &constant("b")), None);
+    }
+
+    #[test]
+    fn unifies_nested_terms() {
+        let left = Term::Fun("f".into(), vec![Term::Var("X".into()), constant("b")]);
+        let right = Term::Fun("f".into(), vec![constant("a"), constant("b")]);
+        assert_eq!(
+            unify_terms(&left, &right),
+            Some([("X".into(), constant("a"))].into_iter().collect())
+        );
+    }
+
+    #[test]
+    fn occurs_check_rejects_infinite_terms() {
+        let variable = Term::Var("X".into());
+        let recursive = Term::Fun("f".into(), vec![variable.clone()]);
+        assert_eq!(unify_terms(&variable, &recursive), None);
+    }
+
+    #[test]
+    fn unifies_matching_atoms() {
+        assert_eq!(
+            unify_atom(&atom("p(X)"), &atom("p(a)")),
+            Some([("X".into(), constant("a"))].into_iter().collect())
+        );
+    }
+
+    #[test]
+    fn rejects_atoms_with_different_predicates() {
+        assert_eq!(unify_atom(&atom("p"), &atom("q")), None);
+    }
+
+    #[test]
+    fn repeated_variables_require_consistent_bindings() {
+        assert!(unify_atom(&atom("p(X,X)"), &atom("p(a,a)")).is_some());
+        assert_eq!(unify_atom(&atom("p(X,X)"), &atom("p(a,b)")), None);
+    }
+
+    #[test]
+    fn unifies_matching_previous_terms() {
+        assert_eq!(
+            unify_terms(
+                &Term::Prev(Box::new(Term::Var("X".into()))),
+                &Term::Prev(Box::new(constant("a"))),
+            ),
+            Some([("X".into(), constant("a"))].into_iter().collect())
+        );
+    }
+
+    #[test]
+    fn current_world_negative_cycle_is_not_stratifiable() {
+        let program = compile("~a => b. ~b => a.").unwrap();
+        assert!(stratify(&program.rules).is_err());
+    }
+
+    #[test]
+    fn previous_world_negation_does_not_create_a_current_cycle() {
+        let program = compile("@~a => b. ~b => a.").unwrap();
+        assert!(stratify(&program.rules).is_ok());
+    }
+
     #[test]
     fn strict_after() {
         let mut state = Interpreter::new(compile("a after b => result.").unwrap());

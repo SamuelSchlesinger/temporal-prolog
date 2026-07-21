@@ -11,6 +11,13 @@ documentation = "https://docs.rs/temporal-prolog"
 readme = "README.md"
 keywords = ["logic-programming", "prolog", "temporal-logic"]
 categories = ["compilers", "science"]
+exclude = [
+    # These repository-level integration tests intentionally consume the
+    # shared corpus outside this standalone crate. Self-contained language,
+    # operator, oracle, and unit tests remain in the published package.
+    "tests/conformance.rs",
+    "tests/model_checker.rs",
+]
 
 [lib]
 name = "temporal_prolog"

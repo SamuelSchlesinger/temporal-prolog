@@ -451,9 +451,29 @@ fn canonical_integer(source: &str, negative: bool) -> Result<String, String> {
 
 fn term_to_atom(term: Term) -> Result<Atom, String> {
     match term {
+        Term::Fun(name, _) if is_reserved_keyword(&name) => Err(format!(
+            "reserved keyword {name:?} cannot be a predicate name"
+        )),
         Term::Fun(name, terms) => Ok(Atom::new(name, terms)),
         _ => Err("predicate position must contain a name or call".into()),
     }
+}
+
+fn is_reserved_keyword(name: &str) -> bool {
+    matches!(
+        name,
+        "since"
+            | "after"
+            | "for"
+            | "eventually"
+            | "always"
+            | "until"
+            | "atnext"
+            | "next"
+            | "is"
+            | "div"
+            | "mod"
+    )
 }
 
 fn flatten_and(cond: Cond) -> Vec<Cond> {
@@ -466,6 +486,261 @@ fn flatten_and(cond: Cond) -> Vec<Cond> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn term(source: &str) -> Result<Term, String> {
+        let mut parser = Parser {
+            tokens: lex(source)?,
+            position: 0,
+        };
+        let parsed = parser.parse_term(0)?;
+        if parser.done() {
+            Ok(parsed)
+        } else {
+            Err(parser.error("unexpected input after term"))
+        }
+    }
+
+    fn condition(source: &str) -> Result<Cond, String> {
+        let mut parser = Parser {
+            tokens: lex(source)?,
+            position: 0,
+        };
+        let parsed = parser.parse_condition()?;
+        if parser.done() {
+            Ok(parsed)
+        } else {
+            Err(parser.error("unexpected input after condition"))
+        }
+    }
+
+    fn constant(name: &str) -> Term {
+        Term::Fun(name.into(), vec![])
+    }
+
+    #[test]
+    fn parses_simple_atoms() {
+        assert_eq!(parse_atom("foo").unwrap(), Atom::new("foo", vec![]));
+        assert_eq!(parse_atom("p(X,Y)").unwrap().terms.len(), 2);
+    }
+
+    #[test]
+    fn parses_variables() {
+        assert_eq!(term("X").unwrap(), Term::Var("X".into()));
+        assert_eq!(term("MyVar").unwrap(), Term::Var("MyVar".into()));
+    }
+
+    #[test]
+    fn parses_numbers() {
+        assert_eq!(term("42").unwrap(), constant("42"));
+    }
+
+    #[test]
+    fn parses_functors() {
+        assert_eq!(
+            term("f(X,Y)").unwrap(),
+            Term::Fun(
+                "f".into(),
+                vec![Term::Var("X".into()), Term::Var("Y".into())]
+            )
+        );
+    }
+
+    #[test]
+    fn parses_empty_and_proper_lists() {
+        assert_eq!(term("[]").unwrap(), constant("[]"));
+        assert_eq!(
+            term("[a,b]").unwrap(),
+            Term::Fun(
+                ".".into(),
+                vec![
+                    constant("a"),
+                    Term::Fun(".".into(), vec![constant("b"), constant("[]")])
+                ]
+            )
+        );
+    }
+
+    #[test]
+    fn parses_improper_lists() {
+        assert_eq!(
+            term("[X|Y]").unwrap(),
+            Term::Fun(
+                ".".into(),
+                vec![Term::Var("X".into()), Term::Var("Y".into())]
+            )
+        );
+    }
+
+    #[test]
+    fn parses_previous_terms() {
+        assert_eq!(
+            term("@X").unwrap(),
+            Term::Prev(Box::new(Term::Var("X".into())))
+        );
+    }
+
+    #[test]
+    fn parses_negated_conditions() {
+        assert!(matches!(condition("~p(X)"), Ok(Cond::Neg(_))));
+    }
+
+    #[test]
+    fn parses_previous_conditions() {
+        assert!(matches!(condition("@p(X)"), Ok(Cond::Prev(_))));
+    }
+
+    #[test]
+    fn parses_has_been_conditions() {
+        assert!(matches!(condition("#p(X)"), Ok(Cond::HasBeen(_))));
+    }
+
+    #[test]
+    fn parses_once_and_eventually_conditions() {
+        assert!(matches!(condition("?p(X)"), Ok(Cond::Once(_))));
+        assert!(matches!(
+            condition("eventually p(X)"),
+            Ok(Cond::Eventually(_))
+        ));
+    }
+
+    #[test]
+    fn parses_since_after_and_for_conditions() {
+        assert!(matches!(condition("a since b"), Ok(Cond::Since(_, _))));
+        assert!(matches!(condition("a after b"), Ok(Cond::After(_, _))));
+        assert!(matches!(condition("a for 3"), Ok(Cond::For(_, 3))));
+    }
+
+    #[test]
+    fn conjunction_binds_tighter_than_since_on_the_left() {
+        assert_eq!(
+            condition("a /\\ b since c").unwrap(),
+            Cond::Since(
+                Box::new(Cond::And(vec![
+                    Cond::Atom(Atom::new("a", vec![])),
+                    Cond::Atom(Atom::new("b", vec![])),
+                ])),
+                Box::new(Cond::Atom(Atom::new("c", vec![])))
+            )
+        );
+    }
+
+    #[test]
+    fn conjunction_binds_tighter_than_since_on_the_right() {
+        assert_eq!(
+            condition("a since b /\\ c").unwrap(),
+            Cond::Since(
+                Box::new(Cond::Atom(Atom::new("a", vec![]))),
+                Box::new(Cond::And(vec![
+                    Cond::Atom(Atom::new("b", vec![])),
+                    Cond::Atom(Atom::new("c", vec![])),
+                ]))
+            )
+        );
+    }
+
+    #[test]
+    fn rejects_zero_repetitions() {
+        assert!(condition("a for 0").is_err());
+    }
+
+    #[test]
+    fn parses_implication_and_fact_rules() {
+        let program = parse_program("a /\\ b => c. p(X).").unwrap();
+        assert!(matches!(program.rules[0], SourceRule::Rule(_, _)));
+        assert!(matches!(program.rules[1], SourceRule::Fact(_)));
+    }
+
+    #[test]
+    fn parses_future_result_operators() {
+        let program =
+            parse_program("always p. a => q until stop. ready atnext trigger. a => next b.")
+                .unwrap();
+        assert!(matches!(
+            program.rules[0],
+            SourceRule::Fact(ResultFormula::Always(_))
+        ));
+        assert!(matches!(
+            program.rules[1],
+            SourceRule::Rule(_, ResultFormula::Until(_, _))
+        ));
+        assert!(matches!(
+            program.rules[2],
+            SourceRule::Fact(ResultFormula::AtNext(_, _))
+        ));
+        assert!(matches!(
+            program.rules[3],
+            SourceRule::Rule(_, ResultFormula::Next(_))
+        ));
+    }
+
+    #[test]
+    fn parses_infix_atoms() {
+        assert_eq!(
+            condition("X > 5").unwrap(),
+            Cond::Atom(Atom::new(">", vec![Term::Var("X".into()), constant("5")]))
+        );
+        assert!(matches!(condition("X = Y"), Ok(Cond::Atom(_))));
+    }
+
+    #[test]
+    fn parses_not_equal_as_negated_unification() {
+        assert!(matches!(condition("X != Y"), Ok(Cond::Neg(_))));
+        assert!(matches!(condition("X \\= Y"), Ok(Cond::Neg(_))));
+    }
+
+    #[test]
+    fn parses_pattern_function_reductions() {
+        let program = parse_program("append([],X) -> X.").unwrap();
+        assert!(matches!(
+            program.rules[0],
+            SourceRule::Fact(ResultFormula::Reduction(_, _, _))
+        ));
+    }
+
+    #[test]
+    fn parses_conditional_pattern_function_reductions() {
+        let program = parse_program("enabled(X) => choose(X) -> selected.").unwrap();
+        assert!(matches!(
+            &program.rules[0],
+            SourceRule::Rule(conditions, ResultFormula::Reduction(name, _, body))
+                if conditions.len() == 1 && name == "choose" && body == &constant("selected")
+        ));
+    }
+
+    #[test]
+    fn rejects_reserved_keywords_as_predicates() {
+        assert!(parse_atom("since").is_err());
+        assert!(parse_atom("always").is_err());
+        assert!(parse_atom("is").is_err());
+        assert!(parse_atom("div").is_err());
+    }
+
+    #[test]
+    fn parses_empty_programs() {
+        assert_eq!(parse_program("").unwrap(), Program { rules: vec![] });
+        assert_eq!(parse_program("  \n  ").unwrap(), Program { rules: vec![] });
+    }
+
+    #[test]
+    fn parses_unicode_operator_aliases() {
+        assert!(matches!(condition("¬p"), Ok(Cond::Neg(_))));
+        assert!(matches!(condition("●p"), Ok(Cond::Prev(_))));
+        assert!(matches!(condition("■p"), Ok(Cond::HasBeen(_))));
+        assert!(matches!(condition("◆p"), Ok(Cond::Once(_))));
+        assert!(parse_program("a ⇒ ○b.").is_ok());
+        assert!(parse_program("□p.").is_ok());
+    }
+
+    #[test]
+    fn parses_negative_integer_literals() {
+        assert_eq!(term("-3").unwrap(), constant("-3"));
+        assert_eq!(term("-42").unwrap(), constant("-42"));
+    }
+
+    #[test]
+    fn rejects_missing_rule_period() {
+        assert!(parse_program("p").is_err());
+    }
 
     #[test]
     fn parses_portable_surface() {
