@@ -40,6 +40,34 @@ data Term
 data Atom = Atom Name [Term]
   deriving (Eq, Ord, Show)
 
+-- | Fixed arity of a built-in external predicate, if the name is reserved.
+externalPredicateArity :: Name -> Maybe Int
+externalPredicateArity "true"  = Just 0
+externalPredicateArity "false" = Just 0
+externalPredicateArity "at"    = Just 1
+externalPredicateArity "="     = Just 2
+externalPredicateArity "is"    = Just 2
+externalPredicateArity ">"     = Just 2
+externalPredicateArity "<"     = Just 2
+externalPredicateArity ">="    = Just 2
+externalPredicateArity "<="    = Just 2
+externalPredicateArity _       = Nothing
+
+-- | Fixed arity of an arithmetic term operator, if the name is reserved.
+arithmeticFunctionArity :: Name -> Maybe Int
+arithmeticFunctionArity "+"   = Just 2
+arithmeticFunctionArity "-"   = Just 2
+arithmeticFunctionArity "*"   = Just 2
+arithmeticFunctionArity "div" = Just 2
+arithmeticFunctionArity "mod" = Just 2
+arithmeticFunctionArity _     = Nothing
+
+-- | Whether an atom uses a reserved external-predicate name.
+isExternalAtom :: Atom -> Bool
+isExternalAtom (Atom name _) = case externalPredicateArity name of
+  Just _  -> True
+  Nothing -> False
+
 -- | Condition formulas (rule bodies)
 data Cond
   = CAtom Atom          -- p(t1,...,tk)

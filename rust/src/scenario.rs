@@ -1,4 +1,4 @@
-use crate::{parse_atom, Atom};
+use crate::{is_external_atom, parse_atom, Atom};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -145,6 +145,11 @@ fn parse_directive(
             if !atom.ground() {
                 return Err("scheduled assertions must be ground".into());
             }
+            if is_external_atom(&atom) {
+                return Err(
+                    "built-in external predicates cannot be scheduled as assertions".into(),
+                );
+            }
             partial.assertions.entry(step).or_default().push(atom);
         }
         "choose" => {
@@ -169,6 +174,9 @@ fn parse_directive(
                 })?;
                 if !atom.ground() {
                     return Err("choice alternatives must be ground".into());
+                }
+                if is_external_atom(&atom) {
+                    return Err("built-in external predicates cannot be choice alternatives".into());
                 }
                 ChoiceAlternative::Atom(atom)
             };
@@ -288,5 +296,15 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.contains("outside"));
+    }
+
+    #[test]
+    fn rejects_builtin_inputs() {
+        let error = parse_scenario(
+            "test.tpmc",
+            "name demo\nprogram demo.tpl\nsteps 1\nassert 0 at(99)\n",
+        )
+        .unwrap_err();
+        assert!(error.contains("built-in"));
     }
 }

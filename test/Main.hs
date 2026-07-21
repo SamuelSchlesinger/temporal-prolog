@@ -1,5 +1,6 @@
 module Main where
 
+import Control.Monad (forM_)
 import Test.Hspec
 import qualified Data.Set as Set
 import qualified Data.Map.Strict as Map
@@ -200,6 +201,22 @@ normalizerSpec = describe "Normalizer" $ do
   it "normalizes simple rules" $ do
     let np = parseAndNormalize "a => b."
     length np `shouldBe` 1
+
+  it "rejects inconsistent source symbol signatures and builtin results" $ do
+    let invalidPrograms =
+          [ "p. p(a)."
+          , "value(box). value(box(a))."
+          , "choose(X) -> X. choose(X, Y) -> X."
+          , "lookup(X) -> X. lookup(a)."
+          , "at(99)."
+          , "at(0, 1) => impossible."
+          , "X is div(1) => impossible(X)."
+          ]
+    mapM_ (\source -> compileSource source `shouldSatisfy` isLeft)
+      invalidPrograms
+
+  it "keeps predicate and constructor namespaces distinct" $ do
+    compileSource "tag(tag)." `shouldSatisfy` isRight
 
   it "reduces an unconditional always result to the bare result (paper step 1(2))" $ do
     let np = parseAndNormalize "always p."
@@ -670,8 +687,11 @@ edgeCaseSpec = describe "Edge cases" $ do
   it "rejects non-ground assertions and negative step counts" $ do
     let st = newInterpreterState [] Set.empty
         nonGround = Atom "p" [TVar "X"]
+        builtin = Atom "at" [TFun "99" []]
     assertFactEither nonGround st `shouldSatisfy` isLeft
     stepWorld (assertFact nonGround st) `shouldSatisfy` isLeft
+    assertFactEither builtin st `shouldSatisfy` isLeft
+    stepWorld (assertFact builtin st) `shouldSatisfy` isLeft
     stepWorldN (-1) st `shouldSatisfy` isLeft
 
   it "world history length after 3 steps" $ do
@@ -1138,6 +1158,17 @@ sharedConformanceSpec = describe "Shared Haskell/Rust conformance corpus" $ do
     compileSource forZero `shouldSatisfy` isLeft
     compileSource plainPrevious `shouldSatisfy` isLeft
     parseProgram "<test>" missingPeriod `shouldSatisfy` isLeft
+    forM_
+      [ "mixed_predicate_arity.tpl"
+      , "mixed_constructor_arity.tpl"
+      , "mixed_pattern_arity.tpl"
+      , "malformed_pattern_relation.tpl"
+      , "builtin_result.tpl"
+      , "malformed_builtin.tpl"
+      , "malformed_arithmetic.tpl"
+      ] $ \filename -> do
+        source <- readFile ("conformance/rejections/" ++ filename)
+        compileSource source `shouldSatisfy` isLeft
     case compileSource unsafeRange of
       Left err -> expectationFailure err
       Right (np, pfNames) ->
@@ -1167,8 +1198,11 @@ batchExecutionSpec = describe "Deterministic branch-preserving batch execution" 
           (Map.singleton 1 [Atom "event" []]) False
         nonground = BatchOptions 1
           (Map.singleton 0 [Atom "event" [TVar "X"]]) False
+        builtin = BatchOptions 1
+          (Map.singleton 0 [Atom "at" [TFun "99" []]]) False
     runBatch unreachable program pfNames `shouldSatisfy` isLeft
     runBatch nonground program pfNames `shouldSatisfy` isLeft
+    runBatch builtin program pfNames `shouldSatisfy` isLeft
 
   it "keeps source predicates ending in _auxN visible" $ do
     case parseProgram "<test>"
@@ -1196,6 +1230,12 @@ modelCheckerSpec = describe "Portable bounded protocol model checker" $ do
       , "program demo.tpl"
       , "steps 1"
       , "assert 1 request"
+      ]) `shouldSatisfy` isLeft
+    parseScenario "<test>" (unlines
+      [ "name demo"
+      , "program demo.tpl"
+      , "steps 1"
+      , "assert 0 at(99)"
       ]) `shouldSatisfy` isLeft
 
   it "parses independent input-choice groups" $ do

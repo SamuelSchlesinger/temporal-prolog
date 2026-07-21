@@ -103,8 +103,11 @@ assertFact a st = st { isAssertions = a : isAssertions st }
 -- rejects any non-ground assertion before it can enter a world.
 assertFactEither :: GroundAtom -> InterpreterState -> Either String InterpreterState
 assertFactEither atom state
-  | isGroundAtom atom = Right (assertFact atom state)
-  | otherwise = Left "Asserted facts must be ground (no variables)"
+  | not (isGroundAtom atom) =
+      Left "Asserted facts must be ground (no variables)"
+  | isExternalAtom atom =
+      Left "Built-in external predicates cannot be asserted"
+  | otherwise = Right (assertFact atom state)
 
 -- | Query whether an atom matches anything in the current world.
 --   For pattern-function predicates, dispatches to the backward chainer
@@ -183,6 +186,9 @@ stepWorldWith computer st =
     if all isGroundAtom (isAssertions st)
       then Right ()
       else Left "Asserted facts must be ground (no variables)"
+    if all (not . isExternalAtom) (isAssertions st)
+      then Right ()
+      else Left "Built-in external predicates cannot be asserted"
     validateExecutableProfile prog pfNames
     computed <- computer prog pfNames worlds assertions worldNum
     Right

@@ -65,6 +65,12 @@ Schedule external inputs with repeated `--assert STEP:ATOM` options and use
 step counts, and out-of-horizon inputs are rejected rather than ignored.
 Generated predicates are tracked by normalization provenance, not guessed from
 their spelling, so source names such as `cache_aux0` remain fully visible.
+Programs are signature-checked before normalization: each predicate and
+constructor has one arity in its own namespace, each pattern function has one
+input arity and an output-extended relational arity, and built-in predicates
+and arithmetic operators have their specified signatures. Built-in predicates
+are conditions evaluated by the engine; they cannot be rule results or
+externally asserted facts.
 
 Run `sh conformance/run.sh` to execute the positive and negative shared corpus
 through both binaries and fail on any output or acceptance mismatch.
@@ -367,15 +373,16 @@ assigned, a process retains the resource as long as it keeps requesting it.
 
 ## Architecture
 
-The implementation follows a three-phase pipeline:
+The implementation follows a five-phase pipeline:
 
 1. **Parse** (`TemporalProlog.Parser`): Megaparsec-based parser converts
    source text into an AST of rules, conditions, results, and pattern
    functions. Supports both ASCII and Unicode operator syntax.
 
 2. **Normalize** (`TemporalProlog.Normalizer`): A five-step transformation
-   pipeline (paper Section 5.1, pp. 10-14) eliminates temporal operators by
-   introducing auxiliary predicates:
+   pipeline (paper Section 5.1, pp. 10-14) first validates source symbol
+   signatures, then eliminates temporal operators by introducing auxiliary
+   predicates:
    - Step 1: Eliminate `always`, `until`, `atnext`, `next`; split conjunctions
    - Step 2: Eliminate `since`, `after`, `for`, `has-been`, `once`
    - Step 3: Expand pattern functions into predicate clauses, transferring
@@ -416,8 +423,8 @@ The implementation follows a three-phase pipeline:
    matching batch runners preserve all minimal branches, canonically sort
    complete histories, and hash the full raw state. The shared conformance gate
    compares byte-for-byte output across temporal operators, pattern functions,
-   arithmetic, recursion through negation, fresh-name collisions, and specified
-   rejection cases.
+   arithmetic, recursion through negation, fresh-name collisions, malformed
+   symbol signatures, built-in misuse, and the other specified rejection cases.
 
 At world 0, every previous-time formula `@F` is false, exactly as defined in
 Section 5.2. In particular, `@~p` is false there, while `~@p` is true; the

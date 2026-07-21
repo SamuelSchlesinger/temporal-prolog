@@ -24,7 +24,7 @@ import Text.Megaparsec (errorBundlePretty)
 import Text.Read (readMaybe)
 
 import TemporalProlog.Parser (parseAtom)
-import TemporalProlog.Syntax (Atom, isGroundAtom)
+import TemporalProlog.Syntax (Atom, isExternalAtom, isGroundAtom)
 
 data Invariant = Invariant
   { invariantName      :: String
@@ -154,6 +154,8 @@ parseDirective lineNumber line partial =
       step <- maybe (Left "assert step must be an integer") Right (readMaybe stepText)
       atom <- parseScenarioAtom lineNumber atomText
       unless (isGroundAtom atom) $ Left "scheduled assertions must be ground"
+      when (isExternalAtom atom) $
+        Left "built-in external predicates cannot be scheduled as assertions"
       Right partial
         { partialAssertions = Map.insertWith (flip (++)) step [atom]
             (partialAssertions partial)
@@ -171,6 +173,8 @@ parseDirective lineNumber line partial =
         else do
           atom <- parseScenarioAtom lineNumber alternativeText
           unless (isGroundAtom atom) $ Left "choice alternatives must be ground"
+          when (isExternalAtom atom) $
+            Left "built-in external predicates cannot be choice alternatives"
           Right (ChoiceAtom atom)
       choices <- addChoice step groupName alternative (partialChoices partial)
       Right partial { partialChoices = choices }

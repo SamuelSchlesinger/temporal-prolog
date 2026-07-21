@@ -1,7 +1,8 @@
 use crate::ast::*;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub fn normalize(program: Program) -> Result<NormalizedProgram, String> {
+    validate_program_symbols(&program)?;
     let pf_names = reduction_names(&program.rules);
     validate_term_previous(&program.rules, &pf_names)?;
     let mut fresh = Fresh::new(identifiers(&program.rules));
@@ -31,6 +32,237 @@ pub fn normalize(program: Program) -> Result<NormalizedProgram, String> {
         pattern_functions: pf_names,
         auxiliary_predicates,
     })
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AtomRole {
+    Condition,
+    Result,
+}
+
+/// Validate fixed symbol signatures and external namespaces before
+/// normalization can erase source distinctions.
+pub fn validate_program_symbols(program: &Program) -> Result<(), String> {
+    let mut patterns = BTreeMap::new();
+    for rule in &program.rules {
+        let result = match rule {
+            SourceRule::Fact(result) | SourceRule::Rule(_, result) => result,
+        };
+        collect_pattern_signatures(result, &mut patterns)?;
+    }
+
+    let mut predicates = BTreeMap::new();
+    let mut constructors = BTreeMap::new();
+    for rule in &program.rules {
+        validate_rule_symbols(rule, &patterns, &mut predicates, &mut constructors)?;
+    }
+    Ok(())
+}
+
+fn collect_pattern_signatures(
+    result: &ResultFormula,
+    patterns: &mut BTreeMap<Name, usize>,
+) -> Result<(), String> {
+    match result {
+        ResultFormula::Atom(_) => Ok(()),
+        ResultFormula::Reduction(name, args, _) => {
+            if external_predicate_arity(name).is_some() || arithmetic_function_arity(name).is_some()
+            {
+                return Err(format!("pattern function name {name:?} is reserved"));
+            }
+            remember_signature(patterns, "pattern function", name, args.len(), "input ")
+        }
+        ResultFormula::Always(result) | ResultFormula::Next(result) => {
+            collect_pattern_signatures(result, patterns)
+        }
+        ResultFormula::Until(result, _) | ResultFormula::AtNext(result, _) => {
+            collect_pattern_signatures(result, patterns)
+        }
+        ResultFormula::And(results) => {
+            for result in results {
+                collect_pattern_signatures(result, patterns)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn validate_rule_symbols(
+    rule: &SourceRule,
+    patterns: &BTreeMap<Name, usize>,
+    predicates: &mut BTreeMap<Name, usize>,
+    constructors: &mut BTreeMap<Name, usize>,
+) -> Result<(), String> {
+    match rule {
+        SourceRule::Fact(result) => {
+            validate_result_symbols(result, patterns, predicates, constructors)
+        }
+        SourceRule::Rule(conditions, result) => {
+            for condition in conditions {
+                validate_cond_symbols(condition, patterns, predicates, constructors)?;
+            }
+            validate_result_symbols(result, patterns, predicates, constructors)
+        }
+    }
+}
+
+fn validate_result_symbols(
+    result: &ResultFormula,
+    patterns: &BTreeMap<Name, usize>,
+    predicates: &mut BTreeMap<Name, usize>,
+    constructors: &mut BTreeMap<Name, usize>,
+) -> Result<(), String> {
+    match result {
+        ResultFormula::Atom(atom) => {
+            validate_atom_symbols(atom, AtomRole::Result, patterns, predicates, constructors)
+        }
+        ResultFormula::Reduction(_, args, body) => {
+            for term in args.iter().chain([body]) {
+                validate_term_symbols(term, patterns, constructors)?;
+            }
+            Ok(())
+        }
+        ResultFormula::Always(result) | ResultFormula::Next(result) => {
+            validate_result_symbols(result, patterns, predicates, constructors)
+        }
+        ResultFormula::Until(result, condition) | ResultFormula::AtNext(result, condition) => {
+            validate_result_symbols(result, patterns, predicates, constructors)?;
+            validate_cond_symbols(condition, patterns, predicates, constructors)
+        }
+        ResultFormula::And(results) => {
+            for result in results {
+                validate_result_symbols(result, patterns, predicates, constructors)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn validate_cond_symbols(
+    condition: &Cond,
+    patterns: &BTreeMap<Name, usize>,
+    predicates: &mut BTreeMap<Name, usize>,
+    constructors: &mut BTreeMap<Name, usize>,
+) -> Result<(), String> {
+    match condition {
+        Cond::Atom(atom) => validate_atom_symbols(
+            atom,
+            AtomRole::Condition,
+            patterns,
+            predicates,
+            constructors,
+        ),
+        Cond::Neg(condition)
+        | Cond::Prev(condition)
+        | Cond::HasBeen(condition)
+        | Cond::Once(condition)
+        | Cond::For(condition, _)
+        | Cond::Eventually(condition) => {
+            validate_cond_symbols(condition, patterns, predicates, constructors)
+        }
+        Cond::Since(left, right) | Cond::After(left, right) => {
+            validate_cond_symbols(left, patterns, predicates, constructors)?;
+            validate_cond_symbols(right, patterns, predicates, constructors)
+        }
+        Cond::And(conditions) => {
+            for condition in conditions {
+                validate_cond_symbols(condition, patterns, predicates, constructors)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn validate_atom_symbols(
+    atom: &Atom,
+    role: AtomRole,
+    patterns: &BTreeMap<Name, usize>,
+    predicates: &mut BTreeMap<Name, usize>,
+    constructors: &mut BTreeMap<Name, usize>,
+) -> Result<(), String> {
+    if let Some(expected) = external_predicate_arity(&atom.name) {
+        if role == AtomRole::Result {
+            return Err(format!(
+                "external predicate {:?} cannot appear in a rule result",
+                atom.name
+            ));
+        }
+        if atom.terms.len() != expected {
+            return Err(format!(
+                "external predicate {:?} expects arity {expected}, found {}",
+                atom.name,
+                atom.terms.len()
+            ));
+        }
+    } else if let Some(input_arity) = patterns.get(&atom.name) {
+        let expected = input_arity + 1;
+        if atom.terms.len() != expected {
+            return Err(format!(
+                "pattern function {:?} has relational arity {expected}, found {}",
+                atom.name,
+                atom.terms.len()
+            ));
+        }
+    } else {
+        remember_signature(predicates, "predicate", &atom.name, atom.terms.len(), "")?;
+    }
+    for term in &atom.terms {
+        validate_term_symbols(term, patterns, constructors)?;
+    }
+    Ok(())
+}
+
+fn validate_term_symbols(
+    term: &Term,
+    patterns: &BTreeMap<Name, usize>,
+    constructors: &mut BTreeMap<Name, usize>,
+) -> Result<(), String> {
+    match term {
+        Term::Var(_) => Ok(()),
+        Term::Prev(term) => validate_term_symbols(term, patterns, constructors),
+        Term::Fun(name, terms) => {
+            if let Some(expected) = patterns.get(name) {
+                if terms.len() != *expected {
+                    return Err(format!(
+                        "pattern function {name:?} expects input arity {expected}, found {}",
+                        terms.len()
+                    ));
+                }
+            } else if let Some(expected) = arithmetic_function_arity(name) {
+                if terms.len() != expected {
+                    return Err(format!(
+                        "arithmetic operator {name:?} expects arity {expected}, found {}",
+                        terms.len()
+                    ));
+                }
+            } else {
+                remember_signature(constructors, "constructor", name, terms.len(), "")?;
+            }
+            for term in terms {
+                validate_term_symbols(term, patterns, constructors)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn remember_signature(
+    signatures: &mut BTreeMap<Name, usize>,
+    kind: &str,
+    name: &str,
+    arity: usize,
+    arity_label: &str,
+) -> Result<(), String> {
+    match signatures.get(name) {
+        None => {
+            signatures.insert(name.to_string(), arity);
+            Ok(())
+        }
+        Some(expected) if *expected == arity => Ok(()),
+        Some(expected) => Err(format!(
+            "{kind} {name:?} has inconsistent {arity_label}arity: expected {expected}, found {arity}"
+        )),
+    }
 }
 
 struct Fresh {
@@ -824,5 +1056,28 @@ mod tests {
             normalized.auxiliary_predicates,
             ["next_aux1".to_string()].into_iter().collect()
         );
+    }
+
+    #[test]
+    fn rejects_inconsistent_source_signatures_and_builtin_results() {
+        for source in [
+            "p. p(a).",
+            "value(box). value(box(a)).",
+            "choose(X) -> X. choose(X,Y) -> X.",
+            "lookup(X) -> X. lookup(a).",
+            "at(99).",
+            "at(0,1) => impossible.",
+            "X is div(1) => impossible(X).",
+        ] {
+            assert!(
+                normalize(parse_program(source).unwrap()).is_err(),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn keeps_predicate_and_constructor_namespaces_distinct() {
+        normalize(parse_program("tag(tag).").unwrap()).unwrap();
     }
 }

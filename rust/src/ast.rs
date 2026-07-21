@@ -19,6 +19,29 @@ pub struct Atom {
     pub terms: Vec<Term>,
 }
 
+/// Fixed arity of a built-in external predicate, if the name is reserved.
+pub fn external_predicate_arity(name: &str) -> Option<usize> {
+    match name {
+        "true" | "false" => Some(0),
+        "at" => Some(1),
+        "=" | "is" | ">" | "<" | ">=" | "<=" => Some(2),
+        _ => None,
+    }
+}
+
+/// Fixed arity of an arithmetic term operator, if the name is reserved.
+pub fn arithmetic_function_arity(name: &str) -> Option<usize> {
+    match name {
+        "+" | "-" | "*" | "div" | "mod" => Some(2),
+        _ => None,
+    }
+}
+
+/// Whether an atom uses a reserved external-predicate name.
+pub fn is_external_atom(atom: &Atom) -> bool {
+    external_predicate_arity(&atom.name).is_some()
+}
+
 impl Atom {
     pub fn new(name: impl Into<String>, terms: Vec<Term>) -> Self {
         Self {

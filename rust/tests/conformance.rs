@@ -129,6 +129,18 @@ fn shared_rejection_cases() {
     ))
     .is_err());
 
+    for source in [
+        include_str!("../../conformance/rejections/mixed_predicate_arity.tpl"),
+        include_str!("../../conformance/rejections/mixed_constructor_arity.tpl"),
+        include_str!("../../conformance/rejections/mixed_pattern_arity.tpl"),
+        include_str!("../../conformance/rejections/malformed_pattern_relation.tpl"),
+        include_str!("../../conformance/rejections/builtin_result.tpl"),
+        include_str!("../../conformance/rejections/malformed_builtin.tpl"),
+        include_str!("../../conformance/rejections/malformed_arithmetic.tpl"),
+    ] {
+        assert!(compile(source).is_err());
+    }
+
     let unsafe_program = compile(include_str!(
         "../../conformance/rejections/unsafe_range.tpl"
     ))

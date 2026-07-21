@@ -6,7 +6,10 @@ Prolog language in the
 It provides parsing, normalization, branch-preserving execution, pattern
 functions, deterministic batch execution, and bounded protocol model checking.
 Its integer extension uses arbitrary-precision values and the same signed
-floor-division semantics as the Haskell implementation.
+floor-division semantics as the Haskell implementation. Compilation validates
+the paper's fixed symbol signatures before normalization, including the
+input/output arity relationship for pattern functions and the reserved
+signatures of built-in operations.
 
 ```rust
 use temporal_prolog::{compile, Interpreter};

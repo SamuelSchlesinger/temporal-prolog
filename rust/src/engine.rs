@@ -26,6 +26,9 @@ impl Interpreter {
         if !atom.ground() {
             return Err("assertions must be ground".into());
         }
+        if is_external_atom(&atom) {
+            return Err("built-in external predicates cannot be asserted".into());
+        }
         self.assertions.insert(atom);
         Ok(())
     }
@@ -47,6 +50,7 @@ impl Interpreter {
 
     /// Return one interpreter branch for every minimal current world.
     pub fn step_all(&self) -> Result<Vec<Self>, String> {
+        validate_assertions(&self.assertions)?;
         validate_profile(&self.program)?;
         let world_number = self.worlds.len();
         let (pf_rules, forward_rules) = partition_rules(&self.program);
@@ -86,6 +90,7 @@ impl Interpreter {
 
     /// Force the finite general evaluator for differential testing.
     pub fn step_general_all(&self) -> Result<Vec<Self>, String> {
+        validate_assertions(&self.assertions)?;
         validate_profile(&self.program)?;
         let n = self.worlds.len();
         let (pf, forward) = partition_rules(&self.program);
@@ -126,6 +131,16 @@ impl Interpreter {
             Ok(match_world(atom, &current))
         }
     }
+}
+
+fn validate_assertions(assertions: &World) -> Result<(), String> {
+    if assertions.iter().any(|atom| !atom.ground()) {
+        return Err("assertions must be ground".into());
+    }
+    if assertions.iter().any(is_external_atom) {
+        return Err("built-in external predicates cannot be asserted".into());
+    }
+    Ok(())
 }
 
 fn partition_rules(program: &NormalizedProgram) -> (Vec<NormalRule>, Vec<NormalRule>) {
@@ -928,5 +943,17 @@ mod tests {
         let state = Interpreter::new(compile(source).unwrap());
         let answers = state.query(&atom("append([1],[2],Z)")).unwrap();
         assert!(!answers.is_empty());
+    }
+
+    #[test]
+    fn rejects_builtin_assertions_even_through_public_state() {
+        let program = compile("ok.").unwrap();
+        let builtin = atom("at(99)");
+        let mut checked = Interpreter::new(program.clone());
+        assert!(checked.assert(builtin.clone()).is_err());
+
+        let mut direct = Interpreter::new(program);
+        direct.assertions.insert(builtin);
+        assert!(direct.step_all().is_err());
     }
 }

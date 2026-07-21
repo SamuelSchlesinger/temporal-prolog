@@ -41,6 +41,9 @@
 * Define portable arbitrary-precision integer semantics in both engines,
   including canonical decimal spellings, infix `div`/`mod`, floor division for
   signed operands, and built-in failure for invalid arithmetic.
+* Validate fixed predicate, constructor, pattern-function, built-in, and
+  arithmetic signatures before normalization; reject built-ins in rule results
+  and external assertion streams in both implementations.
 
 ## 0.1.0.0 -- 2026-03-18
 

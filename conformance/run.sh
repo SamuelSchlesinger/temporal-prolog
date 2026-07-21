@@ -68,5 +68,12 @@ reject_case for-zero conformance/rejections/for_zero.tpl
 reject_case missing-period conformance/rejections/missing_period.tpl
 reject_case plain-previous-term conformance/rejections/plain_previous_term.tpl
 reject_case unsafe-range conformance/rejections/unsafe_range.tpl
+reject_case mixed-predicate-arity conformance/rejections/mixed_predicate_arity.tpl
+reject_case mixed-constructor-arity conformance/rejections/mixed_constructor_arity.tpl
+reject_case mixed-pattern-arity conformance/rejections/mixed_pattern_arity.tpl
+reject_case malformed-pattern-relation conformance/rejections/malformed_pattern_relation.tpl
+reject_case builtin-result conformance/rejections/builtin_result.tpl
+reject_case malformed-builtin conformance/rejections/malformed_builtin.tpl
+reject_case malformed-arithmetic conformance/rejections/malformed_arithmetic.tpl
 
 printf 'All cross-engine conformance cases agree.\n'

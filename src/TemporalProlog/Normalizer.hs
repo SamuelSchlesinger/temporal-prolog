@@ -33,6 +33,7 @@
 module TemporalProlog.Normalizer
   ( normalize
   , normalizeDetailed
+  , validateProgramSymbols
   , NormalizationResult(..)
   , FreshNameGen(..)
   , FreshM
@@ -44,8 +45,10 @@ module TemporalProlog.Normalizer
   , step5
   ) where
 
+import Control.Monad (foldM)
 import Control.Monad.Except
 import Control.Monad.State.Strict
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import TemporalProlog.PrettyPrint (ppNormalRule)
 import TemporalProlog.Syntax
@@ -66,6 +69,171 @@ data NormalizationResult = NormalizationResult
   , normalizedAuxiliaryPredicates :: Set.Set Name
   , normalizationWarnings         :: [String]
   } deriving (Eq, Show)
+
+-- ============================================================
+-- Source symbol-signature validation
+-- ============================================================
+
+data AtomRole = ConditionAtom | ResultAtom
+  deriving (Eq, Show)
+
+data SignatureState = SignatureState
+  { signaturePatternFunctions :: Map.Map Name Int
+  , signaturePredicates       :: Map.Map Name Int
+  , signatureConstructors     :: Map.Map Name Int
+  }
+
+type SignatureM = StateT SignatureState (Either String)
+
+-- | Validate the source-level fixed-signature and namespace contract before
+-- normalization can erase distinctions or silently discard malformed rules.
+validateProgramSymbols :: Program -> Either String ()
+validateProgramSymbols program@(Program rules patternFunctions) = do
+  patternSignatures <- foldM addPatternSignature Map.empty
+    (patternDeclarations program)
+  let initial = SignatureState patternSignatures Map.empty Map.empty
+  evalStateT
+    (mapM_ validatePatternFunction patternFunctions
+      >> mapM_ validateSourceRule rules)
+    initial
+
+patternDeclarations :: Program -> [(Name, Int)]
+patternDeclarations (Program rules patternFunctions) =
+  [ (name, length args)
+  | PatternFunc name args _ <- patternFunctions
+  ] ++ concatMap rulePatternDeclarations rules
+
+rulePatternDeclarations :: Rule -> [(Name, Int)]
+rulePatternDeclarations (Fact result) = resultPatternDeclarations result
+rulePatternDeclarations (Rule _ result) = resultPatternDeclarations result
+
+resultPatternDeclarations :: Result -> [(Name, Int)]
+resultPatternDeclarations (RAtom _) = []
+resultPatternDeclarations (RPatternFunc name args _) = [(name, length args)]
+resultPatternDeclarations (RAlways result) = resultPatternDeclarations result
+resultPatternDeclarations (RUntil result _) = resultPatternDeclarations result
+resultPatternDeclarations (RAtNext result _) = resultPatternDeclarations result
+resultPatternDeclarations (RAnd results) = concatMap resultPatternDeclarations results
+resultPatternDeclarations (RNext result) = resultPatternDeclarations result
+
+addPatternSignature
+  :: Map.Map Name Int
+  -> (Name, Int)
+  -> Either String (Map.Map Name Int)
+addPatternSignature signatures (name, arity)
+  | externalPredicateArity name /= Nothing
+      || arithmeticFunctionArity name /= Nothing =
+      Left $ "Pattern function name '" ++ name ++ "' is reserved"
+  | otherwise = case Map.lookup name signatures of
+      Nothing -> Right (Map.insert name arity signatures)
+      Just expected
+        | expected == arity -> Right signatures
+        | otherwise -> Left $
+            "Pattern function '" ++ name
+            ++ "' has inconsistent input arity: expected " ++ show expected
+            ++ ", found " ++ show arity
+
+validatePatternFunction :: PatternFunc -> SignatureM ()
+validatePatternFunction (PatternFunc _ args body) =
+  mapM_ validateSourceTerm (body : args)
+
+validateSourceRule :: Rule -> SignatureM ()
+validateSourceRule (Fact result) = validateSourceResult result
+validateSourceRule (Rule conditions result) =
+  mapM_ validateSourceCond conditions >> validateSourceResult result
+
+validateSourceResult :: Result -> SignatureM ()
+validateSourceResult (RAtom atom) = validateSourceAtom ResultAtom atom
+validateSourceResult (RPatternFunc _ args body) =
+  mapM_ validateSourceTerm (body : args)
+validateSourceResult (RAlways result) = validateSourceResult result
+validateSourceResult (RUntil result condition) =
+  validateSourceResult result >> validateSourceCond condition
+validateSourceResult (RAtNext result condition) =
+  validateSourceResult result >> validateSourceCond condition
+validateSourceResult (RAnd results) = mapM_ validateSourceResult results
+validateSourceResult (RNext result) = validateSourceResult result
+
+validateSourceCond :: Cond -> SignatureM ()
+validateSourceCond (CAtom atom) = validateSourceAtom ConditionAtom atom
+validateSourceCond (CNeg condition) = validateSourceCond condition
+validateSourceCond (CPrev condition) = validateSourceCond condition
+validateSourceCond (CHasBeen condition) = validateSourceCond condition
+validateSourceCond (COnce condition) = validateSourceCond condition
+validateSourceCond (CSince left right) =
+  validateSourceCond left >> validateSourceCond right
+validateSourceCond (CAfter left right) =
+  validateSourceCond left >> validateSourceCond right
+validateSourceCond (CFor condition _) = validateSourceCond condition
+validateSourceCond (CAnd conditions) = mapM_ validateSourceCond conditions
+validateSourceCond (CEventually condition) = validateSourceCond condition
+
+validateSourceAtom :: AtomRole -> Atom -> SignatureM ()
+validateSourceAtom role (Atom name terms) = do
+  patterns <- gets signaturePatternFunctions
+  case externalPredicateArity name of
+    Just expected
+      | role == ResultAtom -> validationError $
+          "External predicate '" ++ name ++ "' cannot appear in a rule result"
+      | expected /= length terms -> validationError $
+          "External predicate '" ++ name ++ "' expects arity "
+          ++ show expected ++ ", found " ++ show (length terms)
+      | otherwise -> return ()
+    Nothing -> case Map.lookup name patterns of
+      Just inputArity
+        | length terms /= inputArity + 1 -> validationError $
+            "Pattern function '" ++ name ++ "' has relational arity "
+            ++ show (inputArity + 1) ++ ", found " ++ show (length terms)
+        | otherwise -> return ()
+      Nothing -> rememberPredicate name (length terms)
+  mapM_ validateSourceTerm terms
+
+validateSourceTerm :: Term -> SignatureM ()
+validateSourceTerm (TVar _) = return ()
+validateSourceTerm (TPrev term) = validateSourceTerm term
+validateSourceTerm (TFun name terms) = do
+  patterns <- gets signaturePatternFunctions
+  case Map.lookup name patterns of
+    Just expected
+      | expected /= length terms -> validationError $
+          "Pattern function '" ++ name ++ "' expects input arity "
+          ++ show expected ++ ", found " ++ show (length terms)
+      | otherwise -> return ()
+    Nothing -> case arithmeticFunctionArity name of
+      Just expected
+        | expected /= length terms -> validationError $
+            "Arithmetic operator '" ++ name ++ "' expects arity "
+            ++ show expected ++ ", found " ++ show (length terms)
+        | otherwise -> return ()
+      Nothing -> rememberConstructor name (length terms)
+  mapM_ validateSourceTerm terms
+
+rememberPredicate :: Name -> Int -> SignatureM ()
+rememberPredicate name arity = do
+  signatures <- gets signaturePredicates
+  case Map.lookup name signatures of
+    Nothing -> modify' $ \signatureState -> signatureState
+      { signaturePredicates = Map.insert name arity signatures }
+    Just expected
+      | expected == arity -> return ()
+      | otherwise -> validationError $
+          "Predicate '" ++ name ++ "' has inconsistent arity: expected "
+          ++ show expected ++ ", found " ++ show arity
+
+rememberConstructor :: Name -> Int -> SignatureM ()
+rememberConstructor name arity = do
+  signatures <- gets signatureConstructors
+  case Map.lookup name signatures of
+    Nothing -> modify' $ \signatureState -> signatureState
+      { signatureConstructors = Map.insert name arity signatures }
+    Just expected
+      | expected == arity -> return ()
+      | otherwise -> validationError $
+          "Constructor '" ++ name ++ "' has inconsistent arity: expected "
+          ++ show expected ++ ", found " ++ show arity
+
+validationError :: String -> SignatureM a
+validationError = lift . Left
 
 freshName :: String -> FreshM Name
 freshName prefix = do
@@ -612,7 +780,8 @@ normalize source = do
 -- | Full normalization pipeline: steps 1–5, conversion to 'NormalRule', and
 -- exact generated-predicate metadata.
 normalizeDetailed :: Program -> Either String NormalizationResult
-normalizeDetailed (Program rules pfs) =
+normalizeDetailed source@(Program rules pfs) = do
+  validateProgramSymbols source
   let declaredNames = Set.fromList [n | PatternFunc n _ _ <- pfs]
       conditionalNames = Set.fromList (concatMap rulePatternFuncNames rules)
       pfNames = Set.union declaredNames conditionalNames
@@ -640,9 +809,9 @@ normalizeDetailed (Program rules pfs) =
                                   unlines [show r | r <- r5]
       invalidPrevious = any (ruleHasInvalidTermPrev pfNames) rules
                      || any (patternFuncHasInvalidTermPrev pfNames) pfs
-  in if invalidPrevious
-       then Left "Term-level @ is only defined for a term containing a declared pattern-function occurrence"
-       else result
+  if invalidPrevious
+    then Left "Term-level @ is only defined for a term containing a declared pattern-function occurrence"
+    else result
 
 normalPredicateNames :: NormalProgram -> Set.Set Name
 normalPredicateNames rules = Set.fromList $

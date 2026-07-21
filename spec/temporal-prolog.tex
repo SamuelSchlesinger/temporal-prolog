@@ -96,7 +96,22 @@ comparisons, $\true$, $\false$, and $\at/1$.
 
 The concrete implementation infers internal pattern-function names from
 reduction heads.  Other callable names are predicates; constructor names are
-identified by term position.  A program MUST use each name consistently.
+identified by term position.  Predicate and constructor signatures are tracked
+separately, so the same spelling MAY have one predicate arity and one
+constructor arity.  Within either namespace, a program MUST use a symbol at one
+fixed arity.
+
+Every internal pattern-function name has one input arity $k$ across all of its
+reductions.  Its term form has arity $k$, while its relational atom form has
+arity $k+1$, with the final argument denoting the result.  Once a reduction
+declares a pattern-function spelling, other uses of that spelling MUST obey
+these two signatures.  External predicates have the fixed signatures listed
+above and MAY occur only as conditions; they MUST NOT occur in rule results or
+be inserted into a world as external input.  The arithmetic symbols $+$, $-$,
+$*$, \verb|div|, and \verb|mod| have fixed arity two in term position.  An
+implementation MUST validate these constraints before normalization and reject
+the whole source program on a violation.
+
 The concrete spelling \verb|prefix_auxN| is not reserved: a source predicate
 with that spelling remains a source predicate and MUST remain observable.
 Implementations therefore track generated predicates by normalization
@@ -479,6 +494,11 @@ unifies $X$ with its integer result.  Comparisons require ground integer
 operands.  Division by zero and nonground or noninteger arithmetic fail
 without binding and MUST NOT fall through to stored-predicate lookup.
 \verb|!=| and \verb|\=| abbreviate negated Herbrand equality.
+The remaining external predicates are Herbrand equality $=$, the four integer
+comparisons, \verb|at|/1 for the current world number, and the constants
+$\true$ and $\false$.  These operations are determined by the evaluator rather
+than world membership, so an implementation MUST reject them in scheduled
+assertions and model-checking input choices.
 
 The project accepts \verb|eventually c| as a spelling of $\once c$ and
 \verb|next r| as the next-result operator.  These are conservative extensions
@@ -549,7 +569,10 @@ A release is conformant only when all of the following are true.
 
 \begin{enumerate}
   \item Both implementations parse every shared positive corpus case and
-  reject every shared negative case.
+  reject every shared negative case.  Rejections include inconsistent symbol
+  arities, malformed pattern-function relational forms, malformed external
+  operation signatures, and external predicates used as results or asserted
+  world facts.
   \item Normalization invariants hold: no surface temporal operator or
   term-level previous wrapper remains, every body condition is normal, and
   fresh identifiers do not collide with source identifiers.  Generated-name

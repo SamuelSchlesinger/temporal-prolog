@@ -17,7 +17,10 @@ rejection case. Arithmetic coverage includes arbitrary-precision values,
 canonical integer spellings, operator precedence, signed floor division, and
 division-by-zero failure. Adversarial fresh-name cases also verify that source
 predicates ending in `_auxN` remain observable while actual generated
-predicates are hidden unless requested.
+predicates are hidden unless requested. Negative cases additionally cover
+mixed predicate, constructor, and pattern-function arities; malformed
+pattern-function relational calls; malformed built-in and arithmetic
+signatures; and attempts to define an external built-in as a stored result.
 
 Run it from the repository root:
 
