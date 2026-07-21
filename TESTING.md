@@ -8,7 +8,7 @@ so omissions are easier to spot and failures identify one behavior at a time.
 
 | Behavior area | Haskell tests | Rust tests |
 |---|---|---|
-| Surface syntax, precedence, aliases, and rejection boundaries | `test/Main.hs` parser and feature specs | `rust/src/parser.rs` |
+| Surface syntax, precedence, aliases, pretty-printing, round trips, and rejection boundaries | `test/Main.hs` parser and feature specs | `rust/src/parser.rs`, `rust/src/pretty.rs`, `rust/tests/pretty.rs` |
 | AST groundness, variables, substitutions, and symbol signatures | syntax and unification specs | `rust/src/ast.rs`, `rust/src/engine.rs` |
 | Five-step normalization and generated-name provenance | normalizer and term-previous specs | `rust/src/normalize.rs` |
 | First-order unification and occurs check | unification specs | `rust/src/engine.rs` |
@@ -39,6 +39,6 @@ and CI tests the extracted package as well as the full repository suite.
 
 Implementation-specific APIs are tested in their own suites rather than forced
 into a false one-to-one mapping. Haskell additionally exposes warning,
-derivation-tracing, indexed-world, and source pretty-printing APIs; Rust tests
-its public AST transformations and standalone package boundary instead. The
-shared corpus and the semantic rows above are the portability contract.
+derivation-tracing, and indexed-world APIs; Rust additionally tests its public
+AST transformations and standalone package boundary. The shared corpus and the
+semantic rows above are the portability contract.

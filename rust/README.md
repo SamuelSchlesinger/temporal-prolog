@@ -24,5 +24,21 @@ state.step()?;
 # }
 ```
 
+Focused parsers and the source pretty-printer preserve the exact AST, including
+temporal and arithmetic precedence:
+
+```rust
+use temporal_prolog::{parse_rule, pretty_rule};
+
+# fn main() -> Result<(), String> {
+let rule = parse_rule("(ready since start) /\\ enabled => next running.")?;
+assert_eq!(
+    pretty_rule(&rule),
+    "(ready since start) /\\ enabled => next running."
+);
+# Ok(())
+# }
+```
+
 The repository contains the normative specification, shared cross-language
 conformance corpus, command-line tools, and complete documentation.

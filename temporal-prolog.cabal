@@ -22,6 +22,7 @@ tested-with:     GHC == 9.6.7
 extra-doc-files:
     CHANGELOG.md
     README.md
+    TESTING.md
     examples/WALKTHROUGH.md
     output/pdf/temporal-prolog-specification.pdf
     spec/temporal-prolog.tex

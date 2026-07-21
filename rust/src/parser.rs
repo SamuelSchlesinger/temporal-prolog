@@ -22,6 +22,7 @@ enum Token {
     Op(String),
 }
 
+/// Parse a complete source program, including the empty program.
 pub fn parse_program(source: &str) -> Result<Program, String> {
     let tokens = lex(source)?;
     let mut parser = Parser {
@@ -36,16 +37,54 @@ pub fn parse_program(source: &str) -> Result<Program, String> {
     Ok(Program { rules })
 }
 
-pub fn parse_atom(source: &str) -> Result<Atom, String> {
+/// Parse exactly one source rule, including its terminating period.
+pub fn parse_rule(source: &str) -> Result<SourceRule, String> {
     let mut parser = Parser {
         tokens: lex(source)?,
         position: 0,
     };
-    let cond = parser.parse_condition()?;
-    if !parser.done() {
-        return Err(parser.error("unexpected input after atom"));
-    }
-    match cond {
+    let rule = parser.parse_item()?;
+    parser.expect(Token::Dot)?;
+    parser.finish("rule")?;
+    Ok(rule)
+}
+
+/// Parse exactly one condition formula.
+pub fn parse_condition(source: &str) -> Result<Cond, String> {
+    let mut parser = Parser {
+        tokens: lex(source)?,
+        position: 0,
+    };
+    let condition = parser.parse_condition()?;
+    parser.finish("condition")?;
+    Ok(condition)
+}
+
+/// Parse exactly one result formula.
+pub fn parse_result(source: &str) -> Result<ResultFormula, String> {
+    let mut parser = Parser {
+        tokens: lex(source)?,
+        position: 0,
+    };
+    let result = parser.parse_result()?;
+    parser.finish("result")?;
+    Ok(result)
+}
+
+/// Parse exactly one term.
+pub fn parse_term(source: &str) -> Result<Term, String> {
+    let mut parser = Parser {
+        tokens: lex(source)?,
+        position: 0,
+    };
+    let term = parser.parse_term(0)?;
+    parser.finish("term")?;
+    Ok(term)
+}
+
+/// Parse exactly one atom, including infix built-ins such as `X = Y`.
+pub fn parse_atom(source: &str) -> Result<Atom, String> {
+    match parse_condition(source)? {
         Cond::Atom(atom) => Ok(atom),
         _ => Err("expected an atom".into()),
     }
@@ -156,6 +195,13 @@ impl Parser {
     }
     fn error(&self, message: &str) -> String {
         format!("{message} at token {} ({:?})", self.position, self.peek())
+    }
+    fn finish(&self, construct: &str) -> Result<(), String> {
+        if self.done() {
+            Ok(())
+        } else {
+            Err(self.error(&format!("unexpected input after {construct}")))
+        }
     }
     fn expect(&mut self, expected: Token) -> Result<(), String> {
         let found = self.bump();

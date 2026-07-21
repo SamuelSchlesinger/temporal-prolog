@@ -24,6 +24,10 @@ jobs:
       - run: cargo fmt --manifest-path rust/Cargo.toml --check
       - run: cargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path rust/Cargo.toml --all-targets
+      - run: cargo test --manifest-path rust/Cargo.toml --doc
+      - run: cargo doc --manifest-path rust/Cargo.toml --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
       - run: cargo package --manifest-path rust/Cargo.toml
       - run: cargo test --manifest-path rust/target/package/temporal-prolog-0.1.0/Cargo.toml --all-targets --locked
       - run: sh conformance/run.sh

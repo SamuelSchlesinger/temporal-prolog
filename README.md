@@ -246,6 +246,12 @@ Division rounds toward negative infinity, with the remainder taking the sign
 of the divisor. Division by zero and nonground or noninteger arithmetic fail
 without binding. The repetition count in `for` must be positive.
 
+Both libraries can parse and pretty-print source ASTs without changing their
+structure. The Rust API exposes `parse_term`, `parse_condition`, `parse_result`,
+and `parse_rule` alongside `pretty_term`, `pretty_condition`, `pretty_result`,
+`pretty_rule`, and `pretty_program`; round-trip tests cover every grammar form
+and precedence boundary.
+
 ## REPL commands
 
 | Command            | Description                                       |

@@ -47,6 +47,9 @@
 * Enforce symbol signatures across runtime assertions and prior worlds, block
   injection of pattern-function relations and generated predicates, and make
   public queries evaluate external predicates with bindings in both engines.
+* Add public single-term, condition, result, and rule parsers plus a complete
+  source-syntax pretty-printer to the Rust crate; enforce parse/print round trips
+  in both implementations and preserve top-level temporal-condition scope.
 
 ## 0.1.0.0 -- 2026-03-18
 

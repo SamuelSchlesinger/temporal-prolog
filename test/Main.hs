@@ -1169,6 +1169,76 @@ correctnessAndFeatureSpec = describe "Temporal operator semantics, parser extens
     ppAtom (Atom "is" [TVar "Y", TFun "+" [TVar "X", TFun "1" []]])
       `shouldBe` "Y is X + 1"
 
+  it "round-trips every term form through the pretty-printer" $ do
+    let sources =
+          [ "X"
+          , "42"
+          , "-3"
+          , "f(X, g(a))"
+          , "[]"
+          , "[a, b]"
+          , "[H|T]"
+          , "@X"
+          , "@(X + 1)"
+          , "X + (Y + Z)"
+          , "(X + Y) + Z"
+          , "X * (Y + Z)"
+          , "7 div 3 mod 2"
+          ]
+    forM_ sources $ \source -> case parseTerm "<test>" source of
+      Left err -> expectationFailure (show err)
+      Right parsed -> parseTerm "<pretty>" (ppTerm parsed) `shouldBe` Right parsed
+
+  it "round-trips every condition form through the pretty-printer" $ do
+    let sources =
+          [ "p(X)"
+          , "X = Y"
+          , "~p"
+          , "@p"
+          , "#p"
+          , "?p"
+          , "eventually p"
+          , "~@p"
+          , "@~p"
+          , "#(a /\\ b)"
+          , "?(a since b)"
+          , "eventually (a after b)"
+          , "a /\\ b /\\ c"
+          , "(a /\\ b) since c"
+          , "a since (b /\\ c)"
+          , "(a since b) after (c for 2)"
+          , "~(a /\\ b)"
+          ]
+    forM_ sources $ \source -> case parseCond "<test>" source of
+      Left err -> expectationFailure (show err)
+      Right parsed -> parseCond "<pretty>" (ppCond parsed) `shouldBe` Right parsed
+
+  it "round-trips rules without changing temporal-condition scope" $ do
+    let sources =
+          [ "p."
+          , "a /\\ b => c."
+          , "(a since b) /\\ c => next result."
+          , "enabled(X) => choose(X) -> selected."
+          , "q until stop."
+          ]
+    forM_ sources $ \source -> case parseRule "<test>" source of
+      Left err -> expectationFailure (show err)
+      Right parsed -> parseRule "<pretty>" (ppRule parsed) `shouldBe` Right parsed
+    case parseRule "<test>" "(a since b) /\\ c => next result." of
+      Left err -> expectationFailure (show err)
+      Right parsed -> ppRule parsed
+        `shouldBe` "(a since b) /\\ c => next result."
+
+  it "round-trips complete programs through the pretty-printer" $ do
+    let sources =
+          [ ""
+          , "p.\na => next b.\n"
+          , "lookup(X) -> X.\npresent(lookup(key)).\n"
+          ]
+    forM_ sources $ \source -> case parseProgram "<test>" source of
+      Left err -> expectationFailure (show err)
+      Right parsed -> parseProgram "<pretty>" (ppProgram parsed) `shouldBe` Right parsed
+
 sharedConformanceSpec :: Spec
 sharedConformanceSpec = describe "Shared Haskell/Rust conformance corpus" $ do
   it "initial-world negation" $ do

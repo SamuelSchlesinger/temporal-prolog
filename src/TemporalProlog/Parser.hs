@@ -394,24 +394,31 @@ pProgram = do
 
 -- Public API
 
+-- | Parse a complete source program, including the empty program.
 parseProgram :: String -> String -> Either (ParseErrorBundle String Void) Program
 parseProgram = parse pProgram
 
+-- | Parse exactly one source rule, including its terminating period.
 parseRule :: String -> String -> Either (ParseErrorBundle String Void) Rule
 parseRule = parse (sc *> pRule <* eof)
 
+-- | Parse exactly one condition formula.
 parseCond :: String -> String -> Either (ParseErrorBundle String Void) Cond
 parseCond = parse (sc *> pCond <* eof)
 
+-- | Parse exactly one atom, including infix built-ins such as @X = Y@.
 parseAtom :: String -> String -> Either (ParseErrorBundle String Void) Atom
 parseAtom = parse (sc *> pAtom <* eof)
 
+-- | Parse exactly one term.
 parseTerm :: String -> String -> Either (ParseErrorBundle String Void) Term
 parseTerm = parse (sc *> pTerm <* eof)
 
+-- | Parse exactly one top-level rule or pattern-function definition.
 parseProgramItem :: String -> String -> Either (ParseErrorBundle String Void) (Either PatternFunc Rule)
 parseProgramItem = parse (sc *> pProgramItem <* eof)
 
+-- | Read and parse a source file using its path in diagnostics.
 parseFile :: FilePath -> IO (Either (ParseErrorBundle String Void) Program)
 parseFile fp = do
   contents <- readFile fp

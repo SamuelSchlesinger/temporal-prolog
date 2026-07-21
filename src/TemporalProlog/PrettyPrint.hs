@@ -6,11 +6,23 @@
 -- normalized counterparts. Uses ASCII operator syntax. Handles special
 -- display for lists (@[H|T]@, @[a, b, c]@), infix operators (@X > 5@),
 -- and the @\@@ prefix.
-module TemporalProlog.PrettyPrint where
+module TemporalProlog.PrettyPrint
+  ( ppTerm
+  , ppAtom
+  , ppCond
+  , ppResult
+  , ppRule
+  , ppNormalCond
+  , ppNormalRule
+  , ppProgram
+  , ppPatternFunc
+  , ppNormalProgram
+  ) where
 
 import Data.List (intercalate)
 import TemporalProlog.Syntax
 
+-- | Render a well-formed term as parseable source syntax.
 ppTerm :: Term -> String
 ppTerm (TVar v)      = v
 ppTerm (TFun "[]" []) = "[]"
@@ -40,6 +52,7 @@ ppListTail (TFun "[]" [])    = ""
 ppListTail (TFun "." [h, t]) = ", " ++ ppTerm h ++ ppListTail t
 ppListTail t                  = " | " ++ ppTerm t
 
+-- | Render an atom, using infix syntax for built-in binary relations.
 ppAtom :: Atom -> String
 ppAtom (Atom "=" [l, r])  = ppTerm l ++ " = " ++ ppTerm r
 ppAtom (Atom "is" [l, r]) = ppTerm l ++ " is " ++ ppTerm r
@@ -50,6 +63,7 @@ ppAtom (Atom "<=" [l, r]) = ppTerm l ++ " <= " ++ ppTerm r
 ppAtom (Atom p [])         = p
 ppAtom (Atom p ts)         = p ++ "(" ++ intercalate ", " (map ppTerm ts) ++ ")"
 
+-- | Render a condition with parentheses that preserve its exact syntax tree.
 ppCond :: Cond -> String
 ppCond (CAtom a)    = ppAtom a
 ppCond (CNeg c)     = "~" ++ ppCondAtom c
@@ -68,6 +82,7 @@ ppCondAtom c@(CNeg _)  = ppCond c
 ppCondAtom c@(CPrev _) = ppCond c
 ppCondAtom c            = "(" ++ ppCond c ++ ")"
 
+-- | Render a result formula with precedence-preserving parentheses.
 ppResult :: Result -> String
 ppResult (RAtom a)     = ppAtom a
 ppResult (RPatternFunc f args body) =
@@ -82,29 +97,35 @@ ppResultAtom :: Result -> String
 ppResultAtom r@(RAtom _) = ppResult r
 ppResultAtom r            = "(" ++ ppResult r ++ ")"
 
+-- | Render a source rule, including its terminating period.
 ppRule :: Rule -> String
-ppRule (Rule cs r) = intercalate " /\\ " (map ppCond cs) ++ " => " ++ ppResult r ++ "."
+ppRule (Rule cs r) = intercalate " /\\ " (map ppCondAtom cs) ++ " => " ++ ppResult r ++ "."
 ppRule (Fact r)    = ppResult r ++ "."
 
+-- | Render a normal-form condition.
 ppNormalCond :: NormalCond -> String
 ppNormalCond (NormalCond d neg a) =
   let prevs = replicate d '@'
       negStr = if neg then "~" else ""
   in prevs ++ negStr ++ ppAtom a
 
+-- | Render a normal-form rule, including its terminating period.
 ppNormalRule :: NormalRule -> String
 ppNormalRule (NormalRule [] h) = ppAtom h ++ "."
 ppNormalRule (NormalRule cs h) =
   intercalate " /\\ " (map ppNormalCond cs) ++ " => " ++ ppAtom h ++ "."
 
+-- | Render a complete source program with one item per line.
 ppProgram :: Program -> String
 ppProgram prog = unlines $
   map ppPatternFunc (progPatternFuncs prog) ++
   map ppRule (progRules prog)
 
+-- | Render a pattern-function definition, including its terminating period.
 ppPatternFunc :: PatternFunc -> String
 ppPatternFunc (PatternFunc f args body) =
   f ++ "(" ++ intercalate ", " (map ppTerm args) ++ ") -> " ++ ppTerm body ++ "."
 
+-- | Render a complete normal-form program with one rule per line.
 ppNormalProgram :: NormalProgram -> String
 ppNormalProgram = unlines . map ppNormalRule
