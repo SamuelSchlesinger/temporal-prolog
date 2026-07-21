@@ -9,6 +9,11 @@ use std::collections::{BTreeMap, BTreeSet};
 /// bound before expanding the source operator into previous-time conditions.
 pub const MAX_FOR_REPETITIONS: usize = 1000;
 
+/// Largest number of rewrite rounds admitted by each fuel-bounded
+/// normalization phase (Steps 1, 2, and 4). Reaching normal form on the final
+/// round succeeds.
+pub const MAX_NORMALIZATION_ROUNDS: usize = 1000;
+
 pub fn normalize(program: Program) -> Result<NormalizedProgram, String> {
     validate_program_symbols(&program)?;
     let pf_names = reduction_names(&program.rules);
@@ -321,7 +326,7 @@ fn auxiliary_suffix(identifier: &str) -> Option<BigUint> {
 }
 
 fn step1(mut rules: Vec<SourceRule>, fresh: &mut Fresh) -> Result<Vec<SourceRule>, String> {
-    for _ in 0..1000 {
+    for _ in 0..MAX_NORMALIZATION_ROUNDS {
         let mut changed = false;
         let mut next = Vec::new();
         for rule in rules {
@@ -334,7 +339,30 @@ fn step1(mut rules: Vec<SourceRule>, fresh: &mut Fresh) -> Result<Vec<SourceRule
         }
         rules = next;
     }
-    Err("normalizer step 1 exceeded its iteration limit".into())
+    if rules.iter().any(needs_step1) {
+        Err(format!(
+            "normalizer step 1 requires more than {MAX_NORMALIZATION_ROUNDS} rewrite rounds"
+        ))
+    } else {
+        Ok(rules)
+    }
+}
+
+fn needs_step1(rule: &SourceRule) -> bool {
+    let (conditions, result) = match rule {
+        SourceRule::Fact(result) => (&[][..], result),
+        SourceRule::Rule(conditions, result) => (conditions.as_slice(), result),
+    };
+    matches!(
+        result,
+        ResultFormula::Always(_)
+            | ResultFormula::Until(_, _)
+            | ResultFormula::AtNext(_, _)
+            | ResultFormula::And(_)
+            | ResultFormula::Next(_)
+    ) || conditions
+        .iter()
+        .any(|condition| matches!(condition, Cond::And(_)))
 }
 
 fn step1_rule(rule: SourceRule, fresh: &mut Fresh) -> Result<(Vec<SourceRule>, bool), String> {
@@ -465,7 +493,7 @@ fn step1_rule(rule: SourceRule, fresh: &mut Fresh) -> Result<(Vec<SourceRule>, b
 }
 
 fn step2(mut rules: Vec<SourceRule>, fresh: &mut Fresh) -> Result<Vec<SourceRule>, String> {
-    for _ in 0..1000 {
+    for _ in 0..MAX_NORMALIZATION_ROUNDS {
         let mut changed = false;
         let mut next = Vec::new();
         for rule in rules {
@@ -487,7 +515,20 @@ fn step2(mut rules: Vec<SourceRule>, fresh: &mut Fresh) -> Result<Vec<SourceRule
         }
         rules = next;
     }
-    Err("normalizer step 2 exceeded its iteration limit".into())
+    if rules.iter().any(needs_step2) {
+        Err(format!(
+            "normalizer step 2 requires more than {MAX_NORMALIZATION_ROUNDS} rewrite rounds"
+        ))
+    } else {
+        Ok(rules)
+    }
+}
+
+fn needs_step2(rule: &SourceRule) -> bool {
+    match rule {
+        SourceRule::Rule(conditions, _) => conditions.iter().any(has_step2),
+        SourceRule::Fact(_) => false,
+    }
 }
 
 fn transform_step2(
@@ -650,6 +691,12 @@ fn step3(
     pf: &BTreeSet<Name>,
     fresh: &mut Fresh,
 ) -> Result<Vec<SourceRule>, String> {
+    // No term can require pattern-function lifting when the program declares
+    // no pattern function. Besides avoiding needless work, this keeps deeply
+    // nested non-pattern conditions off the call stack.
+    if pf.is_empty() {
+        return Ok(rules);
+    }
     rules
         .into_iter()
         .map(|rule| {
@@ -683,7 +730,7 @@ fn step3(
 }
 
 fn step4(mut rules: Vec<SourceRule>, fresh: &mut Fresh) -> Result<Vec<SourceRule>, String> {
-    for _ in 0..1000 {
+    for _ in 0..MAX_NORMALIZATION_ROUNDS {
         let mut changed = false;
         let mut next = Vec::new();
         for rule in rules {
@@ -708,7 +755,29 @@ fn step4(mut rules: Vec<SourceRule>, fresh: &mut Fresh) -> Result<Vec<SourceRule
         }
         rules = next;
     }
-    Err("normalizer step 4 exceeded its iteration limit".into())
+    if rules.iter().any(needs_step4) {
+        Err(format!(
+            "normalizer step 4 requires more than {MAX_NORMALIZATION_ROUNDS} rewrite rounds"
+        ))
+    } else {
+        Ok(rules)
+    }
+}
+
+fn needs_step4(rule: &SourceRule) -> bool {
+    match rule {
+        SourceRule::Rule(conditions, _) => conditions.iter().any(needs_step4_cond),
+        SourceRule::Fact(_) => false,
+    }
+}
+
+fn needs_step4_cond(condition: &Cond) -> bool {
+    match condition {
+        Cond::Neg(inner) => !matches!(inner.as_ref(), Cond::Atom(_)),
+        Cond::Prev(inner) => needs_step4_cond(inner),
+        Cond::And(conditions) => conditions.iter().any(needs_step4_cond),
+        _ => false,
+    }
 }
 
 fn step4_cond(cond: Cond, fresh: &mut Fresh) -> (Cond, Vec<SourceRule>, bool) {
@@ -1192,6 +1261,71 @@ mod tests {
         assert!(normalize(parse_program("a for 1000 => b.").unwrap()).is_ok());
         assert!(normalize(parse_program("a for 1001 => b.").unwrap()).is_err());
         assert!(normalize(parse_program("a for 18446744073709551617 => b.").unwrap()).is_err());
+    }
+
+    #[test]
+    fn treats_the_step_1_rewrite_round_limit_as_inclusive() {
+        let fired = ResultFormula::Atom(atom("fired"));
+        let result_program = |result| Program {
+            rules: vec![SourceRule::Fact(result)],
+        };
+        let nested_next = |count| {
+            (0..count).fold(fired.clone(), |inner, _| {
+                ResultFormula::Next(Box::new(inner))
+            })
+        };
+
+        assert!(normalize(result_program(nested_next(MAX_NORMALIZATION_ROUNDS))).is_ok());
+        assert!(normalize(result_program(nested_next(MAX_NORMALIZATION_ROUNDS + 1))).is_err());
+    }
+
+    #[test]
+    fn treats_the_step_2_rewrite_round_limit_as_inclusive() {
+        let trigger = Cond::Atom(atom("trigger"));
+        let condition_program = |condition| Program {
+            rules: vec![SourceRule::Rule(
+                vec![condition],
+                ResultFormula::Atom(atom("fired")),
+            )],
+        };
+        let nested_eventually = |count| {
+            (0..count).fold(trigger.clone(), |inner, _| {
+                Cond::Eventually(Box::new(inner))
+            })
+        };
+
+        assert!(normalize(condition_program(nested_eventually(
+            MAX_NORMALIZATION_ROUNDS
+        )))
+        .is_ok());
+        assert!(normalize(condition_program(nested_eventually(
+            MAX_NORMALIZATION_ROUNDS + 1
+        )))
+        .is_err());
+    }
+
+    #[test]
+    fn treats_the_step_4_rewrite_round_limit_as_inclusive() {
+        let trigger = Cond::Atom(atom("trigger"));
+        let condition_program = |condition| Program {
+            rules: vec![SourceRule::Rule(
+                vec![condition],
+                ResultFormula::Atom(atom("fired")),
+            )],
+        };
+        let nested_negation =
+            |count| (0..count).fold(trigger.clone(), |inner, _| Cond::Neg(Box::new(inner)));
+
+        // One negation may remain directly on an atom, so N wrappers require
+        // N - 1 Step-4 rewrites.
+        assert!(normalize(condition_program(nested_negation(
+            MAX_NORMALIZATION_ROUNDS + 1
+        )))
+        .is_ok());
+        assert!(normalize(condition_program(nested_negation(
+            MAX_NORMALIZATION_ROUNDS + 2
+        )))
+        .is_err());
     }
 
     #[test]

@@ -491,9 +491,11 @@ that distinction.
 
 The executable profile requires finite candidate generation and range-restricted
 forward rules. Resource limits and unsafe rules are reported as errors rather
-than being treated as logical failure. The independent Rust crate in `rust/`
-implements the same parser, normalization, backward chainer, stratified fast
-path, and general minimal-model evaluator.
+than being treated as logical failure. Normalization Steps 1, 2, and 4 admit
+1,000 productive rewrite rounds each, inclusively: reaching normal form on the
+final round succeeds, while a remaining target is a resource error. The
+independent Rust crate in `rust/` implements the same parser, normalization,
+backward chainer, stratified fast path, and general minimal-model evaluator.
 
 As an independent check on the shared transition semantics, both test suites
 compare the general evaluator against a direct exhaustive truth-table oracle

@@ -35,6 +35,11 @@ Positive differential cases likewise place an `_auxN` source suffix at the
 observable; internal output proves that both engines choose the exact same
 arbitrary-precision successor for generated predicates.
 
+The gate also generates programs requiring exactly 1,000 and 1,001 Step-1
+rewrite rounds. Both engines must accept the inclusive boundary and reject the
+next round. Unit tests apply the same boundary to normalization Steps 1, 2,
+and 4, including Rust's default test-thread stack.
+
 Run the implementation suites independently with:
 
 ```sh

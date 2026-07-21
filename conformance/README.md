@@ -21,9 +21,11 @@ division-by-zero failure. Adversarial fresh-name cases also verify that source
 predicates ending in `_auxN` remain observable while actual generated
 predicates are hidden unless requested. This includes suffixes beyond signed
 machine range, with internal-output comparison checking the exact successor
-used by both fresh-name allocators. Negative cases additionally cover
-mixed predicate, constructor, and pattern-function arities; malformed
-pattern-function relational calls; malformed built-in and arithmetic
+used by both fresh-name allocators. Generated deep-nesting cases require
+exactly 1,000 and 1,001 Step-1 rewrite rounds, proving that the shared resource
+boundary is inclusive and that the following round is rejected. Negative cases
+additionally cover mixed predicate, constructor, and pattern-function arities;
+malformed pattern-function relational calls; malformed built-in and arithmetic
 signatures; and attempts to define an external built-in as a stored result.
 The negative corpus also rejects unparenthesized chains of non-associative
 past-time condition operators, non-ASCII identifiers, and `for` counts beyond

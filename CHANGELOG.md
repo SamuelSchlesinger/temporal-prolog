@@ -66,6 +66,9 @@
 * Make generated-name counters arbitrary precision, so legal `_auxN` source
   suffixes beyond machine range remain observable and advance fresh names
   exactly instead of being ignored or overflowing.
+* Make the 1,000-round normalization budget inclusive in Steps 1, 2, and 4,
+  aligning Rust with Haskell at the exact boundary and avoiding needless deep
+  Step-3 traversal when no pattern functions exist.
 
 ## 0.1.0.0 -- 2026-03-18
 

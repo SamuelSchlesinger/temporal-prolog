@@ -18,6 +18,9 @@ so behavior cannot depend on the host's pointer width.
 Generated-name counters are also arbitrary precision: a legal source name with
 an `_auxN` suffix above machine range remains observable and advances the next
 internal suffix exactly instead of overflowing.
+Normalization Steps 1, 2, and 4 each allow 1,000 productive rewrite rounds,
+inclusively. A program that reaches normal form on round 1,000 is accepted; a
+residual target after that round is rejected as a resource error.
 
 ```rust
 use temporal_prolog::{compile, Interpreter};

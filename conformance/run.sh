@@ -38,6 +38,18 @@ reject_case() {
   printf 'PASS %s rejected\n' "$case_name"
 }
 
+generate_nested_next() {
+  count=$1
+  destination=$2
+  awk -v count="$count" 'BEGIN {
+    for (i = 0; i < count; i++) printf "next "
+    print "fired."
+  }' >"$destination"
+}
+
+generate_nested_next 1000 "$work_dir/normalization-round-limit.tpl"
+generate_nested_next 1001 "$work_dir/normalization-round-overflow.tpl"
+
 check_case initial-world conformance/cases/initial_world.tpl
 check_case strict-after conformance/cases/after_strict.tpl --steps 3 \
   --assert 0:restart --assert 1:monitoring
@@ -73,6 +85,7 @@ check_case auxiliary-collision-internal conformance/cases/auxiliary_collision.tp
 check_case auxiliary-counter-overflow conformance/cases/auxiliary_counter_overflow.tpl --steps 2
 check_case auxiliary-counter-overflow-internal \
   conformance/cases/auxiliary_counter_overflow.tpl --steps 2 --include-internal
+check_case normalization-round-limit "$work_dir/normalization-round-limit.tpl" --steps 1
 
 reject_case for-zero conformance/rejections/for_zero.tpl
 reject_case missing-period conformance/rejections/missing_period.tpl
@@ -88,6 +101,7 @@ reject_case malformed-arithmetic conformance/rejections/malformed_arithmetic.tpl
 reject_case chained-temporal-condition conformance/rejections/chained_temporal_condition.tpl
 reject_case non-ascii-identifier conformance/rejections/non_ascii_identifier.tpl
 reject_case for-count-overflow conformance/rejections/for_count_overflow.tpl
+reject_case normalization-round-overflow "$work_dir/normalization-round-overflow.tpl"
 reject_case asserted-predicate-arity conformance/cases/initial_world.tpl \
   --assert '0:p(x)'
 reject_case asserted-constructor-arity conformance/cases/term_previous.tpl \

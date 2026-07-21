@@ -359,6 +359,39 @@ normalizerSpec = describe "Normalizer" $ do
     compileSource "a for 1001 => b." `shouldSatisfy` isLeft
     compileSource "a for 18446744073709551617 => b." `shouldSatisfy` isLeft
 
+  it "treats the Step-1 rewrite-round limit as inclusive" $ do
+    let fired = RAtom (Atom "fired" [])
+        resultProgram result = Program [Fact result] []
+        nestedNext count = iterate RNext fired !! count
+    normalizeDetailed (resultProgram (nestedNext maxNormalizationRounds))
+      `shouldSatisfy` isRight
+    normalizeDetailed (resultProgram (nestedNext (maxNormalizationRounds + 1)))
+      `shouldSatisfy` isLeft
+
+  it "treats the Step-2 rewrite-round limit as inclusive" $ do
+    let fired = RAtom (Atom "fired" [])
+        trigger = CAtom (Atom "trigger" [])
+        conditionProgram condition =
+          Program [Rule [condition] fired] []
+        nestedEventually count = iterate CEventually trigger !! count
+    normalizeDetailed (conditionProgram (nestedEventually maxNormalizationRounds))
+      `shouldSatisfy` isRight
+    normalizeDetailed (conditionProgram (nestedEventually (maxNormalizationRounds + 1)))
+      `shouldSatisfy` isLeft
+
+  it "treats the Step-4 rewrite-round limit as inclusive" $ do
+    let fired = RAtom (Atom "fired" [])
+        trigger = CAtom (Atom "trigger" [])
+        conditionProgram condition =
+          Program [Rule [condition] fired] []
+        nestedNegation count = iterate CNeg trigger !! count
+    -- One negation may remain directly on an atom, so N wrappers require
+    -- N - 1 Step-4 rewrites.
+    normalizeDetailed (conditionProgram (nestedNegation (maxNormalizationRounds + 1)))
+      `shouldSatisfy` isRight
+    normalizeDetailed (conditionProgram (nestedNegation (maxNormalizationRounds + 2)))
+      `shouldSatisfy` isLeft
+
   it "normalizes programs with negation" $ do
     let np = parseAndNormalize "~a => b."
     length np `shouldSatisfy` (>= 1)

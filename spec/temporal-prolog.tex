@@ -508,6 +508,9 @@ The Haskell and Rust implementations execute the following common profile.
   1,000 inclusive.  A larger count MUST be rejected as a normalization
   resource error before expansion; it MUST NOT wrap, truncate, or depend on
   the host machine's integer or pointer width.
+  \item Steps 1, 2, and 4 each admit 1,000 productive rounds.  Reaching normal
+  form on round 1,000 succeeds; a target afterward is a resource error.
+  Implementations MUST NOT spend a round on a no-change convergence probe.
   \item Candidate generation for a world reaches a finite fixed point within
   the configured fuel limit.  A program that generates an unbounded Herbrand
   base is rejected for that run.
@@ -629,10 +632,10 @@ A release is conformant only when all of the following are true.
 
 \begin{enumerate}
   \item Both implementations parse every shared positive corpus case and
-  reject every shared negative case.  Rejections include inconsistent symbol
-  arities, non-ASCII identifiers, malformed pattern-function relational forms,
-  malformed external operation signatures, oversized \verb|for| counts, and
-  external predicates used as results or asserted world facts.  Positive cases
+  reject every shared negative case.  Rejections cover symbol-arity conflicts,
+  non-ASCII identifiers, malformed pattern-function and external-operation
+  signatures, oversized \verb|for| counts, and external predicates used as
+  results or assertions.  Positive cases
   exercise contextual keyword reservation across predicate and constructor
   namespaces.  Runtime rejection
   cases cover signature changes across source,

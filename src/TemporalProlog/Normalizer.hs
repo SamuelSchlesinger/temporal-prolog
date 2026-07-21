@@ -37,6 +37,7 @@ module TemporalProlog.Normalizer
   , NormalizationResult(..)
   , FreshNameGen(..)
   , FreshM
+  , maxNormalizationRounds
   , maxForRepetitions
   , step1
   , step2
@@ -242,9 +243,12 @@ freshName prefix = do
   put (FreshNameGen (n + 1))
   return (prefix ++ "_aux" ++ show n)
 
--- | Maximum iterations for normalizer fixed-point loops
-maxNormalizerIterations :: Int
-maxNormalizerIterations = 1000
+-- | Largest number of rewrite rounds admitted by each fuel-bounded
+-- normalization phase (Steps 1, 2, and 4).  A phase that reaches normal form
+-- on the final round succeeds; only a residual target after this many rounds
+-- is rejected.
+maxNormalizationRounds :: Int
+maxNormalizationRounds = 1000
 
 -- | Largest @for@ count admitted by the portable executable profile.  The
 -- source AST retains arbitrary-precision counts; this bound is checked before
@@ -275,7 +279,7 @@ varsToTerms = map TVar
 
 -- | Step 1: Eliminate □, until, atnext; split conjunctions (paper p. 10)
 step1 :: [Rule] -> FreshM [Rule]
-step1 = go maxNormalizerIterations
+step1 = go maxNormalizationRounds
   where
     go 0 _ = throwError "Normalizer step 1 (eliminate always/until/atnext) did not converge within iteration limit"
     go fuel rules = do
@@ -376,7 +380,7 @@ step1Rule rule = case rule of
 
 -- | Step 2: Eliminate since, after, for, ■, ◆ (paper pp. 10–11)
 step2 :: [Rule] -> FreshM [Rule]
-step2 = go maxNormalizerIterations
+step2 = go maxNormalizationRounds
   where
     go 0 _ = throwError "Normalizer step 2 (eliminate since/after/for/has-been/once) did not converge within iteration limit"
     go fuel rules = do
@@ -678,7 +682,7 @@ expandTerm _ _ t@(TVar _) = return (t, [], False)
 -- ============================================================
 
 step4 :: [Rule] -> FreshM [Rule]
-step4 = go maxNormalizerIterations
+step4 = go maxNormalizationRounds
   where
     go 0 _ = throwError "Normalizer step 4 (push negation to atoms) did not converge within iteration limit"
     go fuel rules = do
