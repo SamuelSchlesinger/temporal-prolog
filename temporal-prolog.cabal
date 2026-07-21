@@ -11,8 +11,9 @@ description:
     via operators like @\@@ (previous), @#@ (has-been), and @?@ (once),
     while results may project into the future with @always@, @until@,
     @atnext@, and @next@. Includes a five-step normalization pipeline, a
-    stratified least-fixed-point interpreter with negation-as-failure, and
-    backward chaining for recursive pattern functions.
+    condition-1 least-fixed-point fast path, finite SCC-ordered classical
+    minimal-model execution for recursion through negation, and backward
+    chaining for recursive pattern functions.
 category:        Language
 author:          Samuel Schlesinger
 maintainer:      sgschlesinger@gmail.com
@@ -66,4 +67,14 @@ executable temporal-prolog
         mtl,
         text
     hs-source-dirs:   app
+    default-language: Haskell2010
+
+executable temporal-prolog-bench
+    import:           warnings
+    main-is:          Main.hs
+    build-depends:
+        base ^>=4.18.3.0,
+        temporal-prolog,
+        containers
+    hs-source-dirs:   benchmark
     default-language: Haskell2010

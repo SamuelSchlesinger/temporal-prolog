@@ -267,17 +267,25 @@ transformStep2 cond r otherConds = case cond of
            , Rule [CPrev (CAtom pAtom), a] (RAtom pAtom)
            ]
   CAfter a b -> do
-    -- Paper step 2(4): p is established by a and remains true until b.
-    -- Thus "a after b" records that a is the more recent event (with a
-    -- winning when both hold in the same world).
-    let allVars = Set.toList (Set.union (fvCond a) (fvCond b))
-        vterms = varsToTerms allVars
+    -- The prose definition in paper section 3 is strict: b must be
+    -- witnessed in an earlier world and a in a later one.  Printed step
+    -- 2(4) instead implements "a is more recent than b"; that recurrence
+    -- is an erratum.  Use one persistent latch for b and a second persistent
+    -- latch for the completed strict witness.
+    let bVars = Set.toList (fvCond b)
+        allVars = Set.toList (Set.union (fvCond a) (fvCond b))
+        bTerms = varsToTerms bVars
+        allTerms = varsToTerms allVars
+    seen <- freshName "after_seen"
     p <- freshName "after"
-    let pAtom = Atom p vterms
+    let seenAtom = Atom seen bTerms
+        pAtom = Atom p allTerms
         pCond = CAtom pAtom
     return [ Rule (pCond : otherConds) r
-           , Rule [a] (RAtom pAtom)
-           , Rule [CPrev (CAtom pAtom), CNeg b] (RAtom pAtom)
+           , Rule [b] (RAtom seenAtom)
+           , Rule [CPrev (CAtom seenAtom)] (RAtom seenAtom)
+           , Rule [CPrev (CAtom seenAtom), a] (RAtom pAtom)
+           , Rule [CPrev (CAtom pAtom)] (RAtom pAtom)
            ]
   CEventually a -> transformStep2 (COnce a) r otherConds
   CFor a n -> do
@@ -603,7 +611,65 @@ normalize (Program rules pfs) =
             in return ((ns, pfNames), warnings)
           Nothing -> throwError $ "Normalization produced non-normal rules:\n" ++
                                   unlines [show r | r <- r5]
-  in result
+      invalidPrevious = any (ruleHasInvalidTermPrev pfNames) rules
+                     || any (patternFuncHasInvalidTermPrev pfNames) pfs
+  in if invalidPrevious
+       then Left "Term-level @ is only defined for a term containing a declared pattern-function occurrence"
+       else result
+
+ruleHasInvalidTermPrev :: Set.Set Name -> Rule -> Bool
+ruleHasInvalidTermPrev pfNames (Fact result) = resultHasInvalidTermPrev pfNames result
+ruleHasInvalidTermPrev pfNames (Rule conds result) =
+  any (condHasInvalidTermPrev pfNames) conds
+    || resultHasInvalidTermPrev pfNames result
+
+patternFuncHasInvalidTermPrev :: Set.Set Name -> PatternFunc -> Bool
+patternFuncHasInvalidTermPrev pfNames (PatternFunc _ args body) =
+  any (termHasInvalidPrev pfNames) (body : args)
+
+resultHasInvalidTermPrev :: Set.Set Name -> Result -> Bool
+resultHasInvalidTermPrev pfNames result = case result of
+  RAtom atom -> atomHasInvalidTermPrev pfNames atom
+  RPatternFunc _ args body -> any (termHasInvalidPrev pfNames) (body : args)
+  RAlways inner -> resultHasInvalidTermPrev pfNames inner
+  RUntil inner cond -> resultHasInvalidTermPrev pfNames inner
+                    || condHasInvalidTermPrev pfNames cond
+  RAtNext inner cond -> resultHasInvalidTermPrev pfNames inner
+                     || condHasInvalidTermPrev pfNames cond
+  RAnd inners -> any (resultHasInvalidTermPrev pfNames) inners
+  RNext inner -> resultHasInvalidTermPrev pfNames inner
+
+condHasInvalidTermPrev :: Set.Set Name -> Cond -> Bool
+condHasInvalidTermPrev pfNames cond = case cond of
+  CAtom atom -> atomHasInvalidTermPrev pfNames atom
+  CNeg inner -> condHasInvalidTermPrev pfNames inner
+  CPrev inner -> condHasInvalidTermPrev pfNames inner
+  CHasBeen inner -> condHasInvalidTermPrev pfNames inner
+  COnce inner -> condHasInvalidTermPrev pfNames inner
+  CSince left right -> condHasInvalidTermPrev pfNames left
+                    || condHasInvalidTermPrev pfNames right
+  CAfter left right -> condHasInvalidTermPrev pfNames left
+                    || condHasInvalidTermPrev pfNames right
+  CFor inner _ -> condHasInvalidTermPrev pfNames inner
+  CAnd inners -> any (condHasInvalidTermPrev pfNames) inners
+  CEventually inner -> condHasInvalidTermPrev pfNames inner
+
+atomHasInvalidTermPrev :: Set.Set Name -> Atom -> Bool
+atomHasInvalidTermPrev pfNames (Atom _ terms) =
+  any (termHasInvalidPrev pfNames) terms
+
+termHasInvalidPrev :: Set.Set Name -> Term -> Bool
+termHasInvalidPrev _ (TVar _) = False
+termHasInvalidPrev pfNames (TFun _ terms) =
+  any (termHasInvalidPrev pfNames) terms
+termHasInvalidPrev pfNames (TPrev term) =
+  not (containsPatternFunction pfNames term) || termHasInvalidPrev pfNames term
+
+containsPatternFunction :: Set.Set Name -> Term -> Bool
+containsPatternFunction _ (TVar _) = False
+containsPatternFunction pfNames (TFun name terms) =
+  name `Set.member` pfNames || any (containsPatternFunction pfNames) terms
+containsPatternFunction pfNames (TPrev term) = containsPatternFunction pfNames term
 
 freshStart :: Set.Set String -> Int
 freshStart identifiers =

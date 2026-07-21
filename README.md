@@ -1,6 +1,6 @@
 # Temporal Prolog
 
-**A Haskell implementation of Sakuragawa's (1986) temporal logic programming language**
+**Haskell and Rust implementations of Sakuragawa's (1986) temporal logic programming language**
 
 ## Overview
 
@@ -18,12 +18,18 @@ worlds. Results (rule heads) may use *future-time* operators like `always`,
 `until`, `atnext`, and `next` to project facts forward in time. Together these
 let you express stateful, reactive, and process-control logic declaratively.
 
-The implementation follows the paper closely: a five-step normalization
+The implementations follow the paper closely: a five-step normalization
 pipeline eliminates temporal operators by introducing auxiliary predicates,
-producing rules in a canonical *normal form*. A stratified, least-fixed-point
-interpreter then computes each world in sequence, using negation-as-failure
-under the closed-world assumption. Pattern functions (like list append) are
-resolved via backward chaining, supporting full recursion.
+producing rules in a canonical *normal form*. Condition-1 programs use a
+stratified least-fixed-point fast path; finite negative cycles use the paper's
+SCC-ordered set of classical minimal models and may produce multiple worlds.
+Pattern functions (like list append) are resolved by alpha-renamed backward
+chaining.
+
+The project includes a complete [normative specification](output/pdf/temporal-prolog-specification.pdf)
+with explicit errata for inconsistencies in the 1986 paper
+([LaTeX source](spec/temporal-prolog.tex)).
+Both engines execute the programs in the [shared conformance corpus](conformance/README.md).
 
 ## Quick start
 
@@ -31,6 +37,7 @@ resolved via backward chaining, supporting full recursion.
 
 ```
 cabal build
+cd rust && cargo build
 ```
 
 ### Run the REPL
@@ -38,6 +45,16 @@ cabal build
 ```
 cabal run temporal-prolog
 ```
+
+The Rust implementation provides a batch runner that preserves every minimal
+branch:
+
+```sh
+cargo run --manifest-path rust/Cargo.toml --bin temporal-prolog-rs -- \
+  conformance/cases/negative_cycle.tpl --steps 1
+```
+
+Run `sh benchmarks/run.sh 100` for the matched digest-checked comparison.
 
 You will see a prompt like:
 
@@ -96,7 +113,7 @@ Use `:history` to see all worlds at once.
 | `?`   | `◆`     | Condition | **Once** -- true at some past step          |
 | `eventually` | `◇` | Condition | Synonym for once (past-time)           |
 | `since` | --    | Condition | `a since b` -- a held since b became true   |
-| `after` | --    | Condition | `a after b` -- `a` is the more recent event |
+| `after` | --    | Condition | `a after b` -- `b` occurred strictly before `a`; the witness remains true |
 | `for`   | --    | Condition | `a for n` -- a held for `n > 0` consecutive steps |
 | `always` | `□`  | Result    | **Always** -- holds from now on             |
 | `until`  | --   | Result    | `r until c` -- r holds until c becomes true |
@@ -326,12 +343,14 @@ The implementation follows a three-phase pipeline:
    with any safety warnings.
 
 3. **Interpret** (`TemporalProlog.Interpreter`): A hybrid execution engine:
-   - **Forward chaining** computes each world as a stratified least fixed
-     point of the normalized rules, using negation-as-failure under the
-     closed-world assumption.
+   - **Forward chaining** computes condition-1 programs by stratified least
+     fixed points. Finite current-world negative SCCs are handled by candidate
+     enumeration and the paper's SCC-lexicographic classical minimal-model
+     order. `stepWorldAll` exposes every branch; `stepWorld` chooses a stable
+     canonical branch.
    - **Backward chaining** (SLD-resolution) resolves pattern-function
-     predicates on demand, with alpha-renaming and a depth limit for
-     termination safety. Pattern-function rules are excluded from
+     predicates on demand, with alpha-renaming and an explicit resource error
+     at the recursion limit. Pattern-function rules are excluded from
      stratification since they don't participate in the forward-chaining
      fixed point.
 
@@ -343,13 +362,17 @@ Section 5.2. In particular, `@~p` is false there, while `~@p` is true; the
 normalizer introduces the auxiliary predicate required by Step 4 to preserve
 that distinction.
 
-The executable engine implements the paper's least-model construction for
-programs satisfying Section 5.3's condition 1 (no current-world negative
-dependency cycle). It rejects such cycles instead of attempting the paper's
-more general, potentially nondeterministic set-of-minimal-models semantics.
-Rules whose negated variables are not grounded by positive conditions are
-reported as unsafe because Section 6.1 requires complete instantiation before
-negation as failure.
+The executable profile requires finite candidate generation and range-restricted
+forward rules. Resource limits and unsafe rules are reported as errors rather
+than being treated as logical failure. The independent Rust crate in `rust/`
+implements the same parser, normalization, backward chainer, stratified fast
+path, and general minimal-model evaluator.
+
+One additional paper bug is observable: the Section 4.7 assignment clauses
+have three classical minimal models, not the claimed two. The third contains
+only unsupported `assigned_to_another` blockers. Both engines expose all three
+for the published program; the specification gives a corrected two-choice
+encoding.
 
 Supporting modules:
 - `TemporalProlog.Syntax`: Core AST types (user-facing and normalized)
@@ -366,7 +389,7 @@ condition:
 
 ```prolog
 r(X) /\ ~p(X) => q(X).    % correct: X is bound by r(X) first
-~p(X) => q(X).             % X is unbound -- the safety validator warns
+~p(X) => q(X).             % X is unbound -- execution rejects this rule
 ```
 
 The foot warmer example demonstrates this pattern: `device(X) /\ ~hot(X) => on(X)`

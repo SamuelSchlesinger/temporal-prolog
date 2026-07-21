@@ -1,0 +1,20 @@
+[package]
+name = "temporal-prolog"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Independent Rust implementation of Sakuragawa Temporal Prolog"
+
+[lib]
+name = "temporal_prolog"
+path = "src/lib.rs"
+
+[[bin]]
+name = "temporal-prolog-rs"
+path = "src/main.rs"
+
+[[bin]]
+name = "temporal-prolog-bench"
+path = "src/bin/bench.rs"
+
+[dependencies]

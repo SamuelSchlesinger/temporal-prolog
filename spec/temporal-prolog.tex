@@ -1,0 +1,560 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=28mm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs,longtable,array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{hyperref}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!55!black,
+  urlcolor=blue!55!black,
+  pdftitle={Temporal Prolog: Normative Language Specification},
+  pdfauthor={Temporal Prolog project}
+}
+
+\setlist{nosep}
+\newcommand{\prev}{\mathbin{\bullet}}
+\newcommand{\alwayspast}{\mathbin{\blacksquare}}
+\newcommand{\once}{\mathbin{\blacklozenge}}
+\newcommand{\alwaysfuture}{\mathbin{\square}}
+\newcommand{\sem}[1]{\llbracket #1 \rrbracket}
+\newcommand{\FV}{\operatorname{fv}}
+\newcommand{\true}{\mathsf{true}}
+\newcommand{\false}{\mathsf{false}}
+\newcommand{\at}{\mathsf{at}}
+\newcommand{\since}{\mathbin{\mathsf{since}}}
+\newcommand{\after}{\mathbin{\mathsf{after}}}
+\newcommand{\until}{\mathbin{\mathsf{until}}}
+\newcommand{\atnext}{\mathbin{\mathsf{atnext}}}
+
+\title{Temporal Prolog\\\large Normative Language Specification and 1986 Paper Errata}
+\author{Temporal Prolog project}
+\date{Version 1.0 --- 21 July 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This document specifies Temporal Prolog as implemented by this project.  Its
+source is Takashi Sakuragawa's 1986 paper, but this specification fills in the
+paper's intentionally informal concrete syntax, makes every temporal operator
+denotationally explicit, and corrects inconsistencies identified in the
+published transformation.  The specification separates the mathematical
+language from the finite, range-restricted executable profile.  Both the
+Haskell and Rust implementations are required to accept the same profile,
+normalize it to the same semantics (up to fresh-name alpha equivalence), and
+produce the same set of minimal worlds.
+\end{abstract}
+
+\tableofcontents
+
+\section{Status and conformance}
+
+The key words \textbf{MUST}, \textbf{MUST NOT}, \textbf{SHOULD}, and
+\textbf{MAY} are normative.  A conforming implementation has two layers.
+
+\begin{description}
+  \item[Core semantics.] The trace and minimal-model semantics in
+  Sections~\ref{sec:trace-semantics}--\ref{sec:model}.  This layer is the
+  meaning of a program, including programs with recursion through negation.
+  \item[Executable profile.] The decidable operational subset in
+  Section~\ref{sec:profile}.  Implementations MUST reject inputs outside the
+  profile rather than silently assign them a different meaning.
+\end{description}
+
+The words ``the paper'' below refer to Sakuragawa, \emph{Temporal Prolog},
+RIMS K\={o}ky\={u}roku 586 (1986), pp.~305--329.
+
+\section{Lexical and concrete syntax}
+
+\subsection{Lexical classes}
+
+A variable begins with an uppercase ASCII letter and continues with ASCII
+letters, digits, or underscores.  A name begins with a lowercase ASCII letter
+or underscore and has the same continuation characters.  Decimal integer
+literals may have a leading minus sign.  A comment begins with \verb|%| and
+extends to the end of the line.  Whitespace and comments separate tokens.
+
+The namespaces below are disjoint in the abstract language:
+\[
+V,\quad SF,\quad PF_i,\quad PF_e,\quad P_i,\quad P_e.
+\]
+They denote variables, constructor (Skolem) functions, internal and external
+pattern functions, and internal and external predicates.  Each non-variable
+symbol has a fixed arity.  Constants are arity-zero constructor functions.
+The external predicates include $=$, $\true$, $\false$, and $\at/1$.
+
+The concrete implementation infers internal pattern-function names from
+reduction heads.  Other callable names are predicates; constructor names are
+identified by term position.  A program MUST use each name consistently.
+
+\subsection{Grammar}
+
+The following EBNF is normative for the portable ASCII syntax.  Unicode
+aliases are listed in Table~\ref{tab:aliases}.
+
+\begin{verbatim}
+program      ::= item*
+item         ::= rule "." | reduction "."
+rule         ::= result | condition "=>" result
+reduction    ::= call "->" term
+
+result       ::= result "/\\" result
+               | "always" result
+               | "next" result
+               | result "until" condition
+               | result "atnext" condition
+               | atom
+               | reduction
+
+condition    ::= condition "/\\" condition
+               | "~" condition | "@" condition
+               | "#" condition | "?" condition
+               | condition "since" condition
+               | condition "after" condition
+               | condition "for" positive-integer
+               | atom | "(" condition ")"
+
+atom         ::= call | name
+               | term ("=" | "!=" | "\\=" | "is"
+                       | ">" | "<" | ">=" | "<=") term
+call         ::= name "(" [term ("," term)*] ")"
+
+term         ::= variable | integer | name | call
+               | "[" [term ("," term)* ["|" term]] "]"
+               | "@" term
+               | term ("+" | "-" | "*") term
+               | "(" term ")"
+\end{verbatim}
+
+Unary operators bind most tightly.  Condition conjunction binds more tightly
+than \verb|since|, \verb|after|, and \verb|for|.  Implication binds least
+tightly.  Parentheses SHOULD be used when a result combines conjunction with
+\verb|until| or \verb|atnext|.
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{lll}
+\toprule
+ASCII & Unicode & Meaning \\
+\midrule
+\verb|=>| & $\Rightarrow$ & implication \\
+\verb|/\| & $\wedge$ & conjunction \\
+\verb|->| & $\to$ & reduction \\
+\verb|@| & $\prev$ & previous time \\
+\verb|~| & $\neg$ & negation \\
+\verb|#| & $\alwayspast$ & continuously in the past \\
+\verb|?| & $\once$ & once in the past \\
+\verb|always| & $\alwaysfuture$ & henceforth \\
+\verb|next| & $\bigcirc$ & next time \\
+\bottomrule
+\end{tabular}
+\caption{Portable ASCII spellings and accepted Unicode aliases.}
+\label{tab:aliases}
+\end{table}
+
+\subsection{Well-formed terms and formulas}
+
+Terms are generated by
+\[
+t ::= X \mid f(t_1,\ldots,t_k) \mid \prev t.
+\]
+The paper restricts $\prev t$ to a term containing at least one occurrence of
+a pattern function.  The executable profile enforces that restriction.  In
+particular, \verb|@X| is not a portable way to refer to a variable's old
+binding.  Previous-time pattern-function values are defined in
+Section~\ref{sec:pf}.
+
+An atom is $p(t_1,\ldots,t_k)$.  A condition is an atom closed under negation,
+previous time, past operators, and conjunction.  A result is an internal atom
+or internal reduction closed under implication, conjunction, and future
+operators.  Free variables in each top-level item are universally quantified.
+
+\section{Traces and temporal truth}\label{sec:trace-semantics}
+
+A trace is an infinite sequence $M=\langle w_0,w_1,\ldots\rangle$.  Each
+$w_n$ is a set of ground atoms.  Constructor interpretations and the Herbrand
+domain are time invariant; predicate truth may vary with time.  We write
+$M,n,\rho\models c$ for condition $c$ at time $n$ under grounding
+environment $\rho$.
+
+Atomic truth, conjunction, and negation are classical at a fixed world:
+\begin{align*}
+M,n,\rho &\models a &&\Longleftrightarrow \rho(a)\in w_n,\\
+M,n,\rho &\models \neg c &&\Longleftrightarrow M,n,\rho\not\models c,\\
+M,n,\rho &\models c\wedge d &&\Longleftrightarrow
+  M,n,\rho\models c\text{ and }M,n,\rho\models d.
+\end{align*}
+
+Previous time is false before the trace begins, irrespective of its operand:
+\[
+M,n,\rho\models \prev c
+\Longleftrightarrow n>0\text{ and }M,n-1,\rho\models c.
+\]
+Consequently $\prev\neg p$ is false at $w_0$, while
+$\neg\prev p$ is true there.  An implementation MUST NOT commute negation
+through $\prev$ at the initial world.
+
+The derived past operators have the following meanings:
+\begin{align*}
+M,n,\rho\models \alwayspast c
+&\Longleftrightarrow \forall i\ (0\le i\le n\Rightarrow M,i,\rho\models c),\\
+M,n,\rho\models \once c
+&\Longleftrightarrow \exists i\ (0\le i\le n\land M,i,\rho\models c),\\
+M,n,\rho\models c\since d
+&\Longleftrightarrow \exists j\le n\,.
+  M,j,\rho\models d\land
+  \forall k\,(j\le k\le n\Rightarrow M,k,\rho\models c),\\
+M,n,\rho\models c\after d
+&\Longleftrightarrow \exists i,j\,.
+  0\le i<j\le n\land M,i,\rho\models d\land M,j,\rho\models c,\\
+M,n,\rho\models c\ \mathsf{for}\ k
+&\Longleftrightarrow k>0\land n\ge k-1\land
+  \forall i<k\,. M,n-i,\rho\models c.
+\end{align*}
+The \verb|after| relation is strict and, once witnessed, remains true.  This
+is the paper's prose definition; it corrects the inconsistent printed
+Step~2(4), as explained in Section~\ref{sec:errata}.
+
+The built-in $\at(k)$ is true exactly at $w_k$.  $\true$ is always true and
+$\false$ always false.  Equality is syntactic equality in the Herbrand
+universe.
+
+\section{Result obligations}
+
+A top-level item is required to hold at every time.  We define
+$M,n,\rho\models_R r$ as follows.
+
+An atomic result $a$ requires $M,n,\rho\models a$.  A reduction result is
+defined relationally in Section~\ref{sec:pf}.  Conjunction requires both
+results.  Implication has the usual meaning:
+\[
+M,n,\rho\models_R c\Rightarrow r
+\Longleftrightarrow M,n,\rho\not\models c\text{ or }M,n,\rho\models_R r.
+\]
+
+Future result operators create obligations from the evaluation point:
+\begin{align*}
+M,n,\rho\models_R \alwaysfuture r
+&\Longleftrightarrow \forall k\ge n\,. M,k,\rho\models_R r,\\
+M,n,\rho\models_R \bigcirc r
+&\Longleftrightarrow M,n+1,\rho\models_R r.
+\end{align*}
+For $r\until c$, let $j$ be the least $k\ge n$ satisfying $c$, if one
+exists.  The result $r$ is required at every $k$ with $n\le k<j$; if no such
+$j$ exists, $r$ is required forever from $n$.  For $r\atnext c$, $r$ is
+required at that least $j$ and no obligation is imposed before it.  If $c$
+never occurs, \verb|atnext| imposes no result obligation.
+
+A program $P$ is satisfied by $M$ iff every universally grounded top-level
+item holds at every $n\ge0$.
+
+\section{Normalization}\label{sec:normalization}
+
+Normalization produces clauses
+\[
+\prev^{m_1}(\neg)c_1\wedge\cdots\wedge
+\prev^{m_k}(\neg)c_k\Rightarrow d,
+\]
+where each $c_i$ is atomic, each $m_i\ge0$, and $d$ is an internal atom.
+Fresh predicates and variables MUST be absent from the source program.  Rules
+below are equivalences under the minimal-model semantics; fresh names are
+local to a normalization run.
+
+\subsection{Step 1: future results}
+
+Result conjunction distributes into separate clauses.  Bare future formulas
+simplify as
+\[
+\alwaysfuture q\rightsquigarrow q,
+\qquad
+q\until a\rightsquigarrow \neg a\Rightarrow q,
+\qquad
+q\atnext a\rightsquigarrow a\Rightarrow q.
+\]
+
+For a conditional always result, with fresh $p(\vec X)$ and
+$\vec X=\FV(q)$:
+\begin{align*}
+a\Rightarrow\alwaysfuture q\quad\rightsquigarrow\quad
+&a\Rightarrow p(\vec X),\\
+&\prev p(\vec X)\Rightarrow p(\vec X),\\
+&p(\vec X)\Rightarrow q.
+\end{align*}
+
+For conditional until, let $\vec X=\FV(q,b)$:
+\begin{align*}
+a\Rightarrow q\until b\quad\rightsquigarrow\quad
+&a\Rightarrow p(\vec X),\\
+&\prev p(\vec X)\wedge\prev\neg b\Rightarrow p(\vec X),\\
+&p(\vec X)\wedge\neg b\Rightarrow q.
+\end{align*}
+
+Conditional \verb|atnext| uses the same first two clauses and replaces the
+third with $p(\vec X)\wedge b\Rightarrow q$.  The project extension
+$a\Rightarrow\bigcirc q$ becomes
+$a\Rightarrow p(\FV(q))$ and $\prev p(\FV(q))\Rightarrow q$.
+
+\subsection{Step 2: past conditions}
+
+For each occurrence below, replace the occurrence by $p$ in its surrounding
+clause.  Predicate arguments are exactly the displayed free-variable set,
+not the variables of the surrounding clause.
+
+\begin{center}
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.18\linewidth}
+                  >{\raggedright\arraybackslash}p{0.70\linewidth}}
+\toprule
+Occurrence & Defining clauses \\
+\midrule
+$\alwayspast a$ &
+$a\wedge\at(0)\Rightarrow p(\FV(a))$;
+$\prev p(\FV(a))\wedge a\Rightarrow p(\FV(a))$ \\
+$\once a$ &
+$a\Rightarrow p(\FV(a))$;
+$\prev p(\FV(a))\Rightarrow p(\FV(a))$ \\
+$a\since b$ &
+$b\wedge a\Rightarrow p(\FV(a,b))$;
+$\prev p(\FV(a,b))\wedge a\Rightarrow p(\FV(a,b))$ \\
+$a\after b$ &
+$b\Rightarrow s(\FV(b))$;
+$\prev s(\FV(b))\Rightarrow s(\FV(b))$;
+$\prev s(\FV(b))\wedge a\Rightarrow p(\FV(a,b))$;
+$\prev p(\FV(a,b))\Rightarrow p(\FV(a,b))$ \\
+$a\ \mathsf{for}\ k$ &
+replace with $a\wedge\prev a\wedge\cdots\wedge\prev^{k-1}a$, where $k>0$ \\
+\bottomrule
+\end{longtable}
+\end{center}
+
+The auxiliary $s$ in \verb|after| records that the right operand occurred;
+$p$ records a later left-operand witness.  Using $\prev s$ makes the order
+strict.  Both predicates retain exactly the variables necessary to relate
+their witnesses.
+
+\subsection{Step 3: pattern functions}\label{sec:pf}
+
+An internal reduction
+\[
+c\Rightarrow f(t_1,\ldots,t_k)\to t_0
+\]
+becomes the relational clause
+\[
+c\Rightarrow f(t_1,\ldots,t_k,t_0).
+\]
+The new predicate has arity $k+1$.  Multiple reductions denote a relation;
+the language does not silently impose functional uniqueness.
+
+For the outermost, rightmost pattern-function occurrence
+$f(t_1,\ldots,t_k)$ inside a predicate term, introduce fresh $X$, replace the
+occurrence by $X$, and conjoin $f(t_1,\ldots,t_k,X)$.  If the occurrence lies
+under $m$ term-level previous operators, conjoin
+$\prev^m f(t_1,\ldots,t_k,X)$ while leaving the enclosing predicate at its
+original condition depth.  Repeat until no pattern function occurs in a
+term, then erase every remaining term-level $\prev$ wrapper.
+
+For example,
+\[
+\mathsf{present}(\prev\mathsf{lookup}(k))
+\rightsquigarrow
+\mathsf{present}(X)\wedge\prev\mathsf{lookup}(k,X).
+\]
+Moving \verb|present| into the previous world would be non-conformant.
+
+\subsection{Steps 4 and 5: negation and previous time}
+
+If $\neg a$ occurs and $a$ is not atomic, introduce
+$a\Rightarrow p(\FV(a))$ and replace the occurrence by
+$\neg p(\FV(a))$.  This rule is essential for $\neg\prev a$: directly
+rewriting it as $\prev\neg a$ is invalid at $w_0$.
+
+Finally distribute $\prev$ over conjunction.  A normal condition has exactly
+the shape $\prev^m a$ or $\prev^m\neg a$.
+
+\section{Models and nondeterminism}\label{sec:model}
+
+Past worlds and external atoms at the current world are fixed inputs.  For a
+normal program, remove all previous-time body atoms when constructing the
+current dependency graph.  There is an edge $p\to q$ when a current-world
+atom with predicate $q$ occurs in the body of a clause headed by predicate
+$p$; retain whether the occurrence is positive or negative.
+
+Collapse strongly connected components (SCCs) and order them so every
+dependency SCC precedes its consumers.  Within a current world, compare two
+models lexicographically by the sets of atoms in this SCC order: at the first
+component where they differ, a model is smaller only when its component set
+is a proper subset of the other's.  Incomparable component sets remain
+incomparable.  A model is minimal when no model is smaller by this order.
+
+If no SCC contains a negative edge, the program satisfies the paper's
+condition~1 and has a unique least model.  It is computed SCC-by-SCC by least
+fixed points.  Previous-time conditions do not create current-world
+dependencies.
+
+If a negative edge lies inside an SCC, a conforming implementation MUST NOT
+pretend that the program is stratified.  Its semantics is the set of minimal
+models.  An execution MAY choose any member, and an API intended for testing
+SHOULD expose all members.  For example, the clauses printed in paper
+Section~4.7 (made range restricted here by an explicit domain condition) are:
+\begin{verbatim}
+assign(X) /\ ~assigned_to_another(X) => assigned_to(X).
+assigned_to(X) /\ assign(Y) /\ X != Y => assigned_to_another(Y).
+\end{verbatim}
+With simultaneous requests from 1 and 2, the paper claims two minimal worlds,
+one assigning each requester.  Under its stated model order there is also a
+third: the ``assigned to another'' blocker is true for both requesters and
+neither requester is assigned.
+Neither blocker can be removed without forcing an incomparable assignment,
+so this world is minimal.  Implementations MUST expose all three for the
+published program.  The following corrected encoding has exactly the intended
+two minimal worlds:
+\begin{verbatim}
+assign(X) /\ assign(Y) /\ X != Y /\ ~assigned_to(Y)
+  => assigned_to(X).
+\end{verbatim}
+
+The mathematical language calls a program legal when it has at least one
+model for every interpretation of its external predicates.  This property is
+not decidable for the unrestricted Herbrand universe.
+
+\section{Executable profile}\label{sec:profile}
+
+The Haskell and Rust implementations execute the following common profile.
+
+\begin{enumerate}
+  \item Assertions supplied for a step are ground and form part of the fixed
+  external input for that step.
+  \item Every variable used by a negated condition or a forward-chained head
+  is grounded by positive body conditions, $\at(X)$, unification with a
+  ground term, or a ground arithmetic evaluation before it is observed.
+  \item Candidate generation for a world reaches a finite fixed point within
+  the configured fuel limit.  A program that generates an unbounded Herbrand
+  base is rejected for that run.
+  \item The general evaluator's candidate base is closed under relaxed
+  positive derivation and under every grounded current-world negative atom
+  whose predicate is internal and whose remaining body is satisfied in that
+  relaxed closure.  These steps repeat to a fixed point.  This second clause
+  is necessary because the paper uses classical minimal models: an
+  unsupported atom may occur solely to block a negative antecedent.
+  \item General negative SCCs are executed only when the finite candidate
+  base is no larger than the configured enumeration limit.  Exceeding the
+  limit is a resource error, not a semantic result.
+  \item Internal pattern-function relations are solved by alpha-renamed
+  backward chaining.  Reaching its recursion limit is reported as a resource
+  error in conformance mode; it MUST NOT be reported as logical failure.
+\end{enumerate}
+
+For condition-1 programs, the optimized stratified evaluator and the general
+minimal-model evaluator MUST agree.  Differential tests compare both engines
+and compare the Haskell and Rust implementations on canonicalized worlds.
+
+\section{External operations and project extensions}
+
+The portable executable profile defines integer arithmetic terms
+$+$, $-$, $*$, \verb|div|, and \verb|mod|.  The predicate
+$X\ \mathsf{is}\ E$ evaluates a ground expression $E$ and unifies $X$ with
+its integer result.  Comparisons require ground integer operands.  Division
+by zero fails without binding.  \verb|!=| and \verb|\=| abbreviate negated
+Herbrand equality.
+
+The project accepts \verb|eventually c| as a spelling of $\once c$ and
+\verb|next r| as the next-result operator.  These are conservative extensions
+and are tested by both implementations.
+
+\section{Published-paper errata and clarifications}\label{sec:errata}
+
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.17\linewidth}
+                  >{\raggedright\arraybackslash}p{0.35\linewidth}
+                  >{\raggedright\arraybackslash}p{0.38\linewidth}}
+\toprule
+Location & Published text or ambiguity & Normative resolution \\
+\midrule
+Section 3, \verb|after|; Step 2(4) &
+The prose requires a left-operand occurrence after a right-operand occurrence,
+but the printed recurrence merely remembers the more recent operand and is
+true after the left operand even if the right never occurred. &
+Use the strict two-latch construction in Section~\ref{sec:normalization}.  A
+same-world pair is not ``after,'' and a witnessed pair remains witnessed. \\
+
+Section 3, \verb|for| &
+The metavariable is first called non-negative, then explicitly positive. &
+The operand MUST be positive.  Zero is rejected. \\
+
+Step 1(2) and Step 2 auxiliary arguments &
+Several displayed subscripts alternate $k$ and $l$, and an implementation
+might capture variables from the surrounding clause. &
+Use exactly the free-variable sets printed by the defining operator:
+$\FV(q)$, $\FV(q,b)$, $\FV(a)$, or $\FV(a,b)$. \\
+
+Step 3 term-level previous &
+The paper says to erase term-level bullets after expansion but does not warn
+that lifting the enclosing predicate changes its time. &
+Only the generated pattern-function condition receives the occurrence's term
+depth; the enclosing atom keeps its condition depth. \\
+
+Steps 4--5 at $w_0$ &
+The normal form places negation inside previous operators, which can tempt an
+implementation to rewrite $\neg\prev a$ as $\prev\neg a$. &
+Step 4 MUST introduce an auxiliary before distribution.  The two formulas
+differ at $w_0$. \\
+
+Section 5.3 &
+Condition~1 is a sufficient least-model condition, not the definition of all
+legal programs; Section 4.7 intentionally uses a negative SCC. &
+Expose minimal-model nondeterminism for finite executable cases.  Rejecting
+every negative SCC is a supported fast-path limitation only when clearly
+reported, not a conformant semantic answer. \\
+
+Section 4.7 &
+The nondeterministic assignment program is claimed to have two choices, but
+its two unsupported \texttt{assigned\_to\_another} atoms form a third
+minimal model in which nobody is assigned. &
+Retain all three models for the published clauses, as required by the formal
+minimal-model semantics.  Use the corrected direct-choice clause in
+Section~\ref{sec:model} when exactly two assignment outcomes are intended. \\
+
+Concrete syntax and external domains &
+The paper intentionally gives no machine grammar or domain-declaration syntax. &
+Use Section 2's grammar and Section~\ref{sec:profile}'s ground assertion and
+range-restriction rules. \\
+\bottomrule
+\end{longtable}
+
+\section{Conformance requirements}
+
+A release is conformant only when all of the following are true.
+
+\begin{enumerate}
+  \item Both implementations parse every shared positive corpus case and
+  reject every shared negative case.
+  \item Normalization invariants hold: no surface temporal operator or
+  term-level previous wrapper remains, every body condition is normal, and
+  fresh identifiers do not collide with source identifiers.
+  \item Canonical sets of worlds agree for every shared scenario, including
+  initial-world negation, corrected \verb|after|, recursive pattern
+  functions, unsupported classical blockers, and Section 4.7 nondeterminism.
+  \item The stratified and general evaluators agree wherever condition~1
+  holds.
+  \item Benchmarks report workload parameters, iterations, elapsed time, and
+  a semantic digest.  A timing result without a checked digest is invalid.
+\end{enumerate}
+
+\begin{thebibliography}{9}
+\bibitem{sak1986}
+Takashi Sakuragawa.
+\newblock Temporal Prolog.
+\newblock \emph{RIMS K\={o}ky\={u}roku}, 586:305--329, 1986.
+
+\bibitem{clark1977}
+Keith L. Clark.
+\newblock Negation as failure.
+\newblock In \emph{Logic and Data Bases}, pages 293--322, 1977.
+\end{thebibliography}
+
+\end{document}

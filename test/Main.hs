@@ -27,6 +27,7 @@ main = hspec $ do
   mixedTPrevSpec
   backwardChainingSpec
   correctnessAndFeatureSpec
+  sharedConformanceSpec
 
 -- Helper: parse and normalize a program string
 parseAndNormalize :: String -> NormalProgram
@@ -43,6 +44,13 @@ parseAndNormalizeWithPF src = case parseProgram "<test>" src of
   Right prog -> case normalize prog of
     Left err -> error $ "Normalization error: " ++ err
     Right ((np, pfNames), _warnings) -> (np, pfNames)
+
+compileSource :: String -> Either String (NormalProgram, Set.Set String)
+compileSource src = case parseProgram "<test>" src of
+  Left err -> Left (show err)
+  Right prog -> case normalize prog of
+    Left err -> Left err
+    Right ((np, pfNames), _warnings) -> Right (np, pfNames)
 
 -- Helper: run program for n steps, asserting facts at each step
 -- assertions: list of (worldNum, [atomString]) pairs
@@ -225,6 +233,11 @@ normalizerSpec = describe "Normalizer" $ do
     -- The negated condition should be ncNegated = True
     let hasNeg = any (\r -> any ncNegated (nrConditions r)) np
     hasNeg `shouldBe` True
+
+  it "rejects term-level @ without a pattern-function occurrence" $ do
+    case parseProgram "<test>" "p(@X).\n" of
+      Left err -> expectationFailure (show err)
+      Right prog -> normalize prog `shouldSatisfy` isLeft
 
   it "handles pattern function first substep" $ do
     let np = parseAndNormalize "append([], X) -> X.\n"
@@ -515,10 +528,62 @@ unificationEqualitySpec = describe "Unification = and at(X)" $ do
 -- ============================================================
 
 stratificationSpec :: Spec
-stratificationSpec = describe "Stratification" $ do
-  it "~a => a: negative self-cycle should error" $ do
+stratificationSpec = describe "Condition 1 and general minimal models" $ do
+  it "executes a finite negative self-cycle by its minimal model" $ do
     let np = parseAndNormalize "~a => a.\n"
-    stepWorld (newInterpreterState np Set.empty) `shouldSatisfy` isLeft
+        st = unsafeStep (newInterpreterState np Set.empty)
+    worldContains st "a" `shouldBe` True
+
+  it "exposes every incomparable minimal model" $ do
+    let np = parseAndNormalize "~a => b.\n~b => a.\n"
+    case stepWorldAll (newInterpreterState np Set.empty) of
+      Left err -> expectationFailure err
+      Right states -> do
+        length states `shouldBe` 2
+        map (\st -> (worldContains st "a", worldContains st "b")) states
+          `shouldMatchList` [(True, False), (False, True)]
+
+  it "exposes the third minimal model overlooked in paper section 4.7" $ do
+    let prog = unlines
+          [ "assign(X) /\\ ~assigned_to_another(X) => assigned_to(X)."
+          , "assigned_to(X) /\\ assign(Y) /\\ X != Y => assigned_to_another(Y)."
+          ]
+        (np, pfNames) = parseAndNormalizeWithPF prog
+        st0 = assertFact (Atom "assign" [TFun "1" []])
+            $ assertFact (Atom "assign" [TFun "2" []])
+            $ newInterpreterState np pfNames
+    case stepWorldAll st0 of
+      Left err -> expectationFailure err
+      Right states -> do
+        length states `shouldBe` 3
+        map (\st -> (worldContains st "assigned_to(1)",
+                     worldContains st "assigned_to(2)")) states
+          `shouldMatchList` [(True, False), (False, True), (False, False)]
+
+  it "a corrected two-process choice has exactly two minimal worlds" $ do
+    let prog =
+          "assign(X) /\\ assign(Y) /\\ X != Y /\\ ~assigned_to(Y) => assigned_to(X).\n"
+        (np, pfNames) = parseAndNormalizeWithPF prog
+        st0 = assertFact (Atom "assign" [TFun "1" []])
+            $ assertFact (Atom "assign" [TFun "2" []])
+            $ newInterpreterState np pfNames
+    case stepWorldAll st0 of
+      Left err -> expectationFailure err
+      Right states -> do
+        length states `shouldBe` 2
+        map (\st -> (worldContains st "assigned_to(1)",
+                     worldContains st "assigned_to(2)")) states
+          `shouldMatchList` [(True, False), (False, True)]
+
+  it "general and fast evaluators agree on condition-1 programs" $ do
+    let np = parseAndNormalize "seed(X) => p(X).\np(X) /\\ ~blocked(X) => q(X).\n"
+        st0 = assertFact (Atom "seed" [TFun "a" []])
+            $ newInterpreterState np Set.empty
+    case (stepWorldStratified st0, stepWorldGeneralAll st0) of
+      (Right fast, Right [general]) -> currentWorld fast `shouldBe` currentWorld general
+      (Left err, _) -> expectationFailure err
+      (_, Left err) -> expectationFailure err
+      (_, Right states) -> expectationFailure $ "expected one general model, got " ++ show (length states)
 
   it "@~a => b: @ excludes from dependency graph but is false at world 0" $ do
     let prog = "@~a => b.\n"
@@ -545,6 +610,10 @@ safetyValidationSpec = describe "Safety validation" $ do
     let (_, warnings) = normalizeWithWarnings "@~p(X) => q(X).\n"
     warnings `shouldSatisfy` (not . null)
 
+  it "rejects an unsafe forward rule when execution begins" $ do
+    let np = parseAndNormalize "~p(X) => q(X).\n"
+    stepWorld (newInterpreterState np Set.empty) `shouldSatisfy` isLeft
+
 -- ============================================================
 -- K-M. Edge cases
 -- ============================================================
@@ -562,6 +631,13 @@ edgeCaseSpec = describe "Edge cases" $ do
   it "bare fact: p. derives p" $ do
     let st = runWithAssertions "p.\n" [] 1
     worldContains st "p" `shouldBe` True
+
+  it "rejects non-ground assertions and negative step counts" $ do
+    let st = newInterpreterState [] Set.empty
+        nonGround = Atom "p" [TVar "X"]
+    assertFactEither nonGround st `shouldSatisfy` isLeft
+    stepWorld (assertFact nonGround st) `shouldSatisfy` isLeft
+    stepWorldN (-1) st `shouldSatisfy` isLeft
 
   it "world history length after 3 steps" $ do
     let st0 = newInterpreterState [] Set.empty
@@ -681,16 +757,17 @@ backwardChainingSpec = describe "Backward chaining for pattern functions" $ do
     let expected = TFun "." [TFun "1" [], TFun "." [TFun "2" [], TFun "[]" []]]
     map (\s -> Map.lookup "Z" s) results `shouldContain` [Just expected]
 
-  it "depth limit prevents infinite recursion" $ do
+  it "reports the depth limit as a resource error" $ do
     -- loop(X) -> loop(X) would recurse forever without depth limit
     let prog = unlines
           [ "loop(X) -> loop(X)."
           , "start(a)."
           , "start(X) /\\ loop(X) = Y => result(Y)."
           ]
-    let st = runWithAssertions prog [] 1
-    -- Should not derive result (depth limit hit), but should not crash
-    worldContains st "result(a)" `shouldBe` False
+    let (np, pfNames) = parseAndNormalizeWithPF prog
+    stepWorld (newInterpreterState np pfNames) `shouldSatisfy` isLeft
+    queryAtomEither (Atom "loop" [TFun "a" [], TVar "Y"])
+      (newInterpreterState np pfNames) `shouldSatisfy` isLeft
 
 -- ============================================================
 -- P. Bug fix regression tests
@@ -877,32 +954,35 @@ correctnessAndFeatureSpec = describe "Temporal operator semantics, parser extens
     Set.member (Atom "p" [TFun "a" []]) ps `shouldBe` True
     Set.member (Atom "q" [TFun "b" []]) ps `shouldBe` False
 
-  -- Paper step 2(4): a after b is established by a and persists until b.
-  it "after operator is established by its left event" $ do
+  -- Paper section 3: b must be witnessed strictly before a.  Printed step
+  -- 2(4) is an erratum; the witness remains true once established.
+  it "after operator requires an earlier right event" $ do
     let prog = unlines
           [ "monitoring after restart => check_system."
           ]
     let st = runWithAssertions prog [(0, ["monitoring"])] 1
-    worldContains st "check_system" `shouldBe` True
+    worldContains st "check_system" `shouldBe` False
 
-  it "after operator persists until the right event" $ do
+  it "after operator is strict and remains witnessed" $ do
     let prog = unlines
           [ "monitoring after restart => check_system."
           ]
-        st0 = runWithAssertions prog [(0, ["monitoring"])] 1
+        st0 = runWithAssertions prog [(0, ["restart"])] 1
         st1 = unsafeStep st0
-        st2 = unsafeStep (assertFact (Atom "restart" []) st1)
+        st2 = unsafeStep (assertFact (Atom "monitoring" []) st1)
         st3 = unsafeStep st2
-    worldContains st1 "check_system" `shouldBe` True
-    worldContains st2 "check_system" `shouldBe` False
-    worldContains st3 "check_system" `shouldBe` False
+        st4 = unsafeStep (assertFact (Atom "restart" []) st3)
+    worldContains st1 "check_system" `shouldBe` False
+    worldContains st2 "check_system" `shouldBe` True
+    worldContains st3 "check_system" `shouldBe` True
+    worldContains st4 "check_system" `shouldBe` True
 
-  it "after operator: its left event wins when both events hold" $ do
+  it "after operator rejects a same-world pair" $ do
     let prog = unlines
           [ "a after b => result."
           ]
     let st = runWithAssertions prog [(0, ["a", "b"])] 1
-    worldContains st "result" `shouldBe` True
+    worldContains st "result" `shouldBe` False
 
   -- Pretty-printer handles arithmetic operators
   it "ppTerm prints X + 1 as infix" $ do
@@ -915,6 +995,67 @@ correctnessAndFeatureSpec = describe "Temporal operator semantics, parser extens
   it "ppAtom prints is as infix" $ do
     ppAtom (Atom "is" [TVar "Y", TFun "+" [TVar "X", TFun "1" []]])
       `shouldBe` "Y is X + 1"
+
+sharedConformanceSpec :: Spec
+sharedConformanceSpec = describe "Shared Haskell/Rust conformance corpus" $ do
+  it "initial-world negation" $ do
+    src <- readFile "conformance/cases/initial_world.tpl"
+    let st = runWithAssertions src [] 1
+    worldContains st "inner_negation" `shouldBe` False
+    worldContains st "outer_negation" `shouldBe` True
+
+  it "strict after remains latched" $ do
+    src <- readFile "conformance/cases/after_strict.tpl"
+    let same = runWithAssertions src [(0, ["restart", "monitoring"])] 1
+    worldContains same "check_system" `shouldBe` False
+    let witnessed = runWithAssertions src [(0, ["restart"]), (1, ["monitoring"])] 3
+    worldContains witnessed "check_system" `shouldBe` True
+
+  it "negative cycle exposes both branches" $ do
+    src <- readFile "conformance/cases/negative_cycle.tpl"
+    let (np, pfNames) = parseAndNormalizeWithPF src
+    case stepWorldAll (newInterpreterState np pfNames) of
+      Left err -> expectationFailure err
+      Right states -> map (\st -> (worldContains st "a", worldContains st "b")) states
+        `shouldMatchList` [(True, False), (False, True)]
+
+  it "paper section 4.7 exposes its overlooked third branch" $ do
+    src <- readFile "conformance/cases/paper_4_7.tpl"
+    let (np, pfNames) = parseAndNormalizeWithPF src
+        st = assertFact (Atom "assign" [TFun "1" []])
+           $ assertFact (Atom "assign" [TFun "2" []])
+           $ newInterpreterState np pfNames
+    case stepWorldAll st of
+      Left err -> expectationFailure err
+      Right states -> length states `shouldBe` 3
+
+  it "retains unsupported blockers admitted by classical minimal semantics" $ do
+    src <- readFile "conformance/cases/unsupported_blocker.tpl"
+    let (np, pfNames) = parseAndNormalizeWithPF src
+    case stepWorldAll (newInterpreterState np pfNames) of
+      Left err -> expectationFailure err
+      Right states -> do
+        length states `shouldBe` 2
+        map (\st -> (worldContains st "p(a)", worldContains st "q(a)")) states
+          `shouldMatchList` [(True, False), (False, True)]
+
+  it "recursive pattern-function expansion" $ do
+    src <- readFile "conformance/cases/append.tpl"
+    let st = runWithAssertions src [] 1
+    worldContains st "joined([1,2,3,4])" `shouldBe` True
+
+  it "rejects the shared negative corpus at the specified boundaries" $ do
+    forZero <- readFile "conformance/rejections/for_zero.tpl"
+    plainPrevious <- readFile "conformance/rejections/plain_previous_term.tpl"
+    missingPeriod <- readFile "conformance/rejections/missing_period.tpl"
+    unsafeRange <- readFile "conformance/rejections/unsafe_range.tpl"
+    compileSource forZero `shouldSatisfy` isLeft
+    compileSource plainPrevious `shouldSatisfy` isLeft
+    parseProgram "<test>" missingPeriod `shouldSatisfy` isLeft
+    case compileSource unsafeRange of
+      Left err -> expectationFailure err
+      Right (np, pfNames) ->
+        stepWorld (newInterpreterState np pfNames) `shouldSatisfy` isLeft
 
 -- Helper to filter internal atoms
 isInternal :: Atom -> Bool

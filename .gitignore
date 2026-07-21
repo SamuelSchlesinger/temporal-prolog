@@ -1,4 +1,5 @@
 dist-newstyle/
+rust/target/
 *.o
 *.hi
 *.dyn_o

@@ -4,10 +4,20 @@
 
 * Align normalization and world-zero semantics with Sakuragawa's Section 5
   transformations, including the distinct meanings of `~@p` and `@~p`.
-* Implement the paper's `after` recurrence and exact auxiliary-variable sets.
+* Correct the paper's inconsistent `after` recurrence to implement its strict
+  prose semantics, and use exact auxiliary-variable sets.
 * Expand term-level previous values at the pattern-function occurrence, and
   support conditional pattern-function reductions.
 * Reject non-positive `for` counts and avoid collisions with generated names.
+* Implement finite SCC-ordered classical minimal-model enumeration and expose
+  all branches through `stepWorldAll`; retain the stratified fast path.
+* Identify and specify the overlooked third minimal model in paper Section 4.7.
+* Report pattern-function recursion exhaustion as a resource error and enforce
+  the executable profile's term-level previous and range restrictions.
+* Add an independent Rust parser, normalizer, backward chainer, and world
+  evaluator, plus a shared cross-language conformance corpus.
+* Add matched, digest-checked Haskell/Rust benchmark harnesses and a normative
+  LaTeX specification with paper errata.
 
 ## 0.1.0.0 -- 2026-03-18
 
