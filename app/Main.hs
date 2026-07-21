@@ -3,7 +3,6 @@ module Main where
 import Control.Exception (try, IOException)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad (when)
-import Data.Char (isDigit)
 import Data.Maybe (isJust)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -23,6 +22,7 @@ data REPLState = REPLState
   , rsProgram  :: Program
   , rsNormProg :: NormalProgram
   , rsPFNames  :: Set.Set String
+  , rsAuxNames :: Set.Set String
   }
 
 main :: IO ()
@@ -35,6 +35,7 @@ main = do
         , rsProgram  = emptyProg
         , rsNormProg = []
         , rsPFNames  = Set.empty
+        , rsAuxNames = Set.empty
         }
   runInputT defaultSettings (loop initState)
 
@@ -117,12 +118,15 @@ cmdLoad st fp = do
       Left err -> do
         outputStrLn $ "Parse error: " ++ errorBundlePretty err
         return (Just st)
-      Right prog -> case normalize prog of
+      Right prog -> case normalizeDetailed prog of
         Left err -> do
           outputStrLn $ "Normalization error: " ++ err
           return (Just st)
-        Right ((normProg, pfNames), warnings) -> do
-          liftIO $ mapM_ (hPutStrLn stderr) warnings
+        Right normalized -> do
+          let normProg = normalizedProgram normalized
+              pfNames = normalizedPatternFunctions normalized
+              auxNames = normalizedAuxiliaryPredicates normalized
+          liftIO $ mapM_ (hPutStrLn stderr) (normalizationWarnings normalized)
           let interp = newInterpreterState normProg pfNames
           outputStrLn $ "Loaded " ++ show (length (progRules prog)) ++ " rules and "
                       ++ show (length (progPatternFuncs prog)) ++ " pattern functions from " ++ fp
@@ -130,6 +134,7 @@ cmdLoad st fp = do
                            , rsNormProg = normProg
                            , rsInterp   = interp
                            , rsPFNames  = pfNames
+                           , rsAuxNames = auxNames
                            }
 
 cmdSave :: REPLState -> String -> InputT IO (Maybe REPLState)
@@ -181,7 +186,8 @@ cmdWorld st = do
   case currentWorld (rsInterp st) of
     Nothing -> outputStrLn "No world computed yet. Use :step to advance."
     Just w -> do
-      let userFacts = filter (not . isInternalAtom) (Set.toList (worldToSet w))
+      let userFacts = filter (not . isInternalAtom (rsAuxNames st))
+            (Set.toList (worldToSet w))
       case getWorldNumber (rsInterp st) of
         Nothing -> outputStrLn "World:"
         Just n  -> outputStrLn $ "World " ++ show n ++ ":"
@@ -194,7 +200,8 @@ cmdHistory st = do
   if null hist
     then outputStrLn "No history yet. Use :step to advance."
     else mapM_ (\(i, w) -> do
-      let userFacts = filter (not . isInternalAtom) (Set.toList (worldToSet w))
+      let userFacts = filter (not . isInternalAtom (rsAuxNames st))
+            (Set.toList (worldToSet w))
       outputStrLn $ "World " ++ show i ++ ":"
       mapM_ (outputStrLn . ("  " ++) . ppAtom) userFacts
       ) (zip [(0::Int)..] hist)
@@ -218,7 +225,8 @@ cmdTrace st = do
             Nothing -> "?"
             Just n  -> show n
       outputStrLn $ "Derivations for world " ++ wnStr ++ ":"
-      let userTraces = filter (\(a, _) -> not (isInternalAtom a)) traces
+      let userTraces = filter
+            (\(a, _) -> not (isInternalAtom (rsAuxNames st) a)) traces
       mapM_ (\(fact, rule) ->
         outputStrLn $ "  " ++ ppAtom fact ++ "  <--  " ++ ppNormalRule rule
         ) userTraces
@@ -248,6 +256,7 @@ cmdReset _ = do
     , rsProgram  = Program [] []
     , rsNormProg = []
     , rsPFNames  = Set.empty
+    , rsAuxNames = Set.empty
     }
 
 handleProgramInput :: String -> REPLState -> InputT IO (Maybe REPLState)
@@ -262,12 +271,15 @@ handleProgramInput input st = case parseProgramItem "<repl>" input of
                       "Added: " ++ ppPatternFunc pf)
           Right rule -> (prog { progRules = progRules prog ++ [rule] },
                          "Added: " ++ ppRule rule)
-    case normalize prog' of
+    case normalizeDetailed prog' of
       Left err -> do
         outputStrLn $ "Normalization error: " ++ err
         return (Just st)
-      Right ((normProg, pfNames), warnings) -> do
-        liftIO $ mapM_ (hPutStrLn stderr) warnings
+      Right normalized -> do
+        let normProg = normalizedProgram normalized
+            pfNames = normalizedPatternFunctions normalized
+            auxNames = normalizedAuxiliaryPredicates normalized
+        liftIO $ mapM_ (hPutStrLn stderr) (normalizationWarnings normalized)
         let oldInterp = rsInterp st
             interp' = oldInterp { isProgram = normProg, isPFNames = pfNames }
         outputStrLn addedMsg
@@ -277,6 +289,7 @@ handleProgramInput input st = case parseProgramItem "<repl>" input of
                          , rsNormProg = normProg
                          , rsInterp   = interp'
                          , rsPFNames  = pfNames
+                         , rsAuxNames = auxNames
                          }
 
 showHelp :: InputT IO ()
@@ -301,17 +314,11 @@ showHelp = do
 
 -- | Check if an atom is internal (should be hidden from user-facing output).
 -- Matches 'true', 'at', and normalizer-generated auxiliary names (e.g. always_aux0).
-isInternalAtom :: Atom -> Bool
-isInternalAtom (Atom "true" []) = True
-isInternalAtom (Atom "at" _)    = True
-isInternalAtom (Atom name _)    = isGeneratedAuxName name
-
--- | Check if a name matches the normalizer's freshName pattern: *_aux<digits>
-isGeneratedAuxName :: String -> Bool
-isGeneratedAuxName name =
-  let rev = reverse name
-      (digits, rest) = span isDigit rev
-  in  not (null digits) && take 4 rest == "xua_"
+isInternalAtom :: Set.Set Name -> Atom -> Bool
+isInternalAtom _ (Atom "true" []) = True
+isInternalAtom _ (Atom "at" _)    = True
+isInternalAtom auxiliaryNames (Atom name _) =
+  name `Set.member` auxiliaryNames
 
 showSubst :: Subst -> String
 showSubst s

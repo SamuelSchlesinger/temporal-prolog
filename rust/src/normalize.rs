@@ -13,30 +13,71 @@ pub fn normalize(program: Program) -> Result<NormalizedProgram, String> {
     for rule in rules {
         normal.push(to_normal(rule)?);
     }
+    let normal_predicates = normal
+        .iter()
+        .flat_map(|rule| {
+            std::iter::once(&rule.head.name)
+                .chain(rule.conditions.iter().map(|condition| &condition.atom.name))
+        })
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let auxiliary_predicates = fresh
+        .generated
+        .intersection(&normal_predicates)
+        .cloned()
+        .collect();
     Ok(NormalizedProgram {
         rules: normal,
         pattern_functions: pf_names,
+        auxiliary_predicates,
     })
 }
 
 struct Fresh {
     used: BTreeSet<String>,
     counter: usize,
+    generated: BTreeSet<String>,
 }
 
 impl Fresh {
     fn new(used: BTreeSet<String>) -> Self {
-        Self { used, counter: 0 }
+        let counter = used
+            .iter()
+            .filter_map(|identifier| auxiliary_suffix(identifier))
+            .max()
+            .map_or(0, |value| value + 1);
+        Self {
+            used,
+            counter,
+            generated: BTreeSet::new(),
+        }
     }
     fn name(&mut self, prefix: &str) -> String {
         loop {
             let name = format!("{prefix}_aux{}", self.counter);
             self.counter += 1;
             if self.used.insert(name.clone()) {
+                self.generated.insert(name.clone());
                 return name;
             }
         }
     }
+}
+
+fn auxiliary_suffix(identifier: &str) -> Option<usize> {
+    let digit_count = identifier
+        .chars()
+        .rev()
+        .take_while(char::is_ascii_digit)
+        .count();
+    if digit_count == 0 {
+        return None;
+    }
+    let prefix = &identifier[..identifier.len() - digit_count];
+    if !prefix.ends_with("_aux") {
+        return None;
+    }
+    identifier[identifier.len() - digit_count..].parse().ok()
 }
 
 fn step1(mut rules: Vec<SourceRule>, fresh: &mut Fresh) -> Result<Vec<SourceRule>, String> {
@@ -773,5 +814,15 @@ mod tests {
     #[test]
     fn rejects_plain_previous_term() {
         assert!(normalize(parse_program("p(@X).").unwrap()).is_err());
+    }
+
+    #[test]
+    fn records_generated_predicates_without_hiding_source_aux_names() {
+        let normalized =
+            normalize(parse_program("user_aux0. trigger => next generated.").unwrap()).unwrap();
+        assert_eq!(
+            normalized.auxiliary_predicates,
+            ["next_aux1".to_string()].into_iter().collect()
+        );
     }
 }

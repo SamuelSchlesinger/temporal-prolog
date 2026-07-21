@@ -63,6 +63,8 @@ Their output is byte-identical, including a digest of the complete raw state.
 Schedule external inputs with repeated `--assert STEP:ATOM` options and use
 `--include-internal` to display normalization auxiliaries. Invalid groundness,
 step counts, and out-of-horizon inputs are rejected rather than ignored.
+Generated predicates are tracked by normalization provenance, not guessed from
+their spelling, so source names such as `cache_aux0` remain fully visible.
 
 Run `sh conformance/run.sh` to execute the positive and negative shared corpus
 through both binaries and fail on any output or acceptance mismatch.
@@ -409,7 +411,8 @@ The implementation follows a three-phase pipeline:
    matching batch runners preserve all minimal branches, canonically sort
    complete histories, and hash the full raw state. The shared conformance gate
    compares byte-for-byte output across temporal operators, pattern functions,
-   arithmetic, recursion through negation, and specified rejection cases.
+   arithmetic, recursion through negation, fresh-name collisions, and specified
+   rejection cases.
 
 At world 0, every previous-time formula `@F` is false, exactly as defined in
 Section 5.2. In particular, `@~p` is false there, while `~@p` is true; the

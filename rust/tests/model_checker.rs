@@ -102,3 +102,22 @@ fn explores_explicit_no_input_alternative() {
     assert_eq!(result.nodes.len(), 3);
     assert_eq!(result.counterexample_traces().len(), 1);
 }
+
+#[test]
+fn renders_source_aux_suffixes_but_hides_generated_predicates() {
+    let scenario = parse_scenario(
+        "auxiliary.tpmc",
+        "name auxiliary\nprogram ignored.tpl\nsteps 2\n\
+         assert 0 trigger\ninvariant no_bad forbids bad\n",
+    )
+    .unwrap();
+    let result = run_model_check(
+        &scenario,
+        compile("user_aux0. always_aux0. trigger => next generated.").unwrap(),
+    )
+    .unwrap();
+    let dot = result.render_dot(false);
+    assert!(dot.contains("user_aux0"));
+    assert!(dot.contains("always_aux0"));
+    assert!(!dot.contains("next_aux1"));
+}

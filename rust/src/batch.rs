@@ -79,7 +79,10 @@ pub fn render_batch(result: &BatchResult) -> String {
         for (world_number, world) in branch.worlds.iter().enumerate() {
             let facts = world
                 .iter()
-                .filter(|atom| result.options.include_internal || !internal_atom(atom))
+                .filter(|atom| {
+                    result.options.include_internal
+                        || !internal_atom(atom, &branch.program.auxiliary_predicates)
+                })
                 .map(canonical_atom)
                 .collect::<Vec<_>>()
                 .join(",");
@@ -123,13 +126,8 @@ fn canonical_term(term: &Term) -> String {
     }
 }
 
-fn internal_atom(atom: &Atom) -> bool {
-    atom.name == "true" || atom.name == "at" || generated_auxiliary(&atom.name)
-}
-
-fn generated_auxiliary(name: &str) -> bool {
-    let digit_count = name.chars().rev().take_while(char::is_ascii_digit).count();
-    digit_count > 0 && name[..name.len() - digit_count].ends_with("_aux")
+fn internal_atom(atom: &Atom, auxiliary_predicates: &std::collections::BTreeSet<String>) -> bool {
+    atom.name == "true" || atom.name == "at" || auxiliary_predicates.contains(&atom.name)
 }
 
 #[cfg(test)]
@@ -167,5 +165,24 @@ mod tests {
             .assertions
             .insert(0, vec![parse_atom("event(X)").unwrap()]);
         assert!(run_batch(nonground, program).is_err());
+    }
+
+    #[test]
+    fn source_aux_suffixes_remain_visible() {
+        let mut options = BatchOptions {
+            steps: 2,
+            ..BatchOptions::default()
+        };
+        options
+            .assertions
+            .insert(0, vec![parse_atom("trigger").unwrap()]);
+        let result = run_batch(
+            options,
+            compile("user_aux0. always_aux0. trigger => next generated.").unwrap(),
+        )
+        .unwrap();
+        let rendered = render_batch(&result);
+        assert!(rendered.contains("w0=[always_aux0,trigger,user_aux0]"));
+        assert!(!rendered.contains("next_aux1"));
     }
 }

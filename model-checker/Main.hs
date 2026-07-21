@@ -10,7 +10,7 @@ import Text.Megaparsec (errorBundlePretty)
 import Text.Read (readMaybe)
 
 import TemporalProlog.ModelChecker
-import TemporalProlog.Normalizer (normalize)
+import TemporalProlog.Normalizer
 import TemporalProlog.Parser (parseProgram)
 import TemporalProlog.Scenario
 
@@ -51,12 +51,15 @@ run options scenarioFile = do
   program <- case parseProgram programFile programSource of
     Left err -> die (errorBundlePretty err)
     Right value -> pure value
-  (normalProgram, pfNames) <- case normalize program of
+  normalized <- case normalizeDetailed program of
     Left err -> die err
-    Right ((value, names), warnings) -> do
-      mapM_ (hPutStrLn stderr) warnings
-      pure (value, names)
-  result <- case runModelCheck scenario normalProgram pfNames of
+    Right value -> do
+      mapM_ (hPutStrLn stderr) (normalizationWarnings value)
+      pure value
+  result <- case runModelCheckWithAuxiliaries scenario
+      (normalizedProgram normalized)
+      (normalizedPatternFunctions normalized)
+      (normalizedAuxiliaryPredicates normalized) of
     Left err -> die err
     Right value -> pure value
   putStr (renderCheckSummary (optionCounterexamples options)

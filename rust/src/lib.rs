@@ -17,7 +17,8 @@ pub use normalize::*;
 pub use parser::*;
 pub use scenario::*;
 
-/// Parse and normalize a portable source program.
+/// Parse and normalize a portable source program, retaining generated-name
+/// metadata for user-facing renderers.
 pub fn compile(source: &str) -> Result<NormalizedProgram, String> {
     normalize(parser::parse_program(source)?)
 }

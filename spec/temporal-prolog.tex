@@ -93,6 +93,10 @@ The external predicates include $=$, $\true$, $\false$, and $\at/1$.
 The concrete implementation infers internal pattern-function names from
 reduction heads.  Other callable names are predicates; constructor names are
 identified by term position.  A program MUST use each name consistently.
+The concrete spelling \verb|prefix_auxN| is not reserved: a source predicate
+with that spelling remains a source predicate and MUST remain observable.
+Implementations therefore track generated predicates by normalization
+provenance rather than classifying names lexically.
 
 \subsection{Grammar}
 
@@ -535,7 +539,9 @@ A release is conformant only when all of the following are true.
   reject every shared negative case.
   \item Normalization invariants hold: no surface temporal operator or
   term-level previous wrapper remains, every body condition is normal, and
-  fresh identifiers do not collide with source identifiers.
+  fresh identifiers do not collide with source identifiers.  Generated-name
+  provenance is exact: source identifiers resembling the fresh-name spelling
+  remain observable, while only actual auxiliaries are hidden by default.
   \item Canonical sets of worlds agree for every shared scenario, including
   initial-world negation, corrected \verb|after|, recursive pattern
   functions, unsupported classical blockers, and Section 4.7 nondeterminism.

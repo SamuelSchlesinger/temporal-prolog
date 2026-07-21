@@ -9,6 +9,7 @@ module TemporalProlog.Batch
   ( BatchOptions(..)
   , BatchResult(..)
   , runBatch
+  , runBatchWithAuxiliaries
   , renderBatch
   , semanticDigest
   ) where
@@ -16,7 +17,6 @@ module TemporalProlog.Batch
 import Control.Monad (foldM, forM, forM_, unless, when)
 import Data.Bits (xor)
 import qualified Data.ByteString as ByteString
-import Data.Char (isDigit)
 import Data.List (intercalate, sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
@@ -42,6 +42,7 @@ data BatchOptions = BatchOptions
 data BatchResult = BatchResult
   { batchResultOptions  :: BatchOptions
   , batchResultBranches :: [InterpreterState]
+  , batchResultAuxiliaryPredicates :: Set Name
   } deriving (Show)
 
 -- | Execute a finite schedule while preserving every minimal-model branch.
@@ -52,12 +53,24 @@ runBatch
   -> NormalProgram
   -> Set Name
   -> Either String BatchResult
-runBatch options program pfNames = do
+runBatch options program pfNames =
+  runBatchWithAuxiliaries options program pfNames Set.empty
+
+-- | Batch execution with exact normalizer-generated predicate metadata for
+-- user-facing rendering.
+runBatchWithAuxiliaries
+  :: BatchOptions
+  -> NormalProgram
+  -> Set Name
+  -> Set Name
+  -> Either String BatchResult
+runBatchWithAuxiliaries options program pfNames auxiliaryPredicates = do
   validateOptions options
   branches <- go 0 [newInterpreterState program pfNames]
   Right BatchResult
     { batchResultOptions = options
     , batchResultBranches = sortOn branchKey branches
+    , batchResultAuxiliaryPredicates = auxiliaryPredicates
     }
   where
     go step branches
@@ -97,6 +110,7 @@ renderBatch result = unlines $
   where
     options = batchResultOptions result
     branches = batchResultBranches result
+    auxiliaryPredicates = batchResultAuxiliaryPredicates result
 
     renderBranch index branch =
       ("branch=" ++ show index) :
@@ -109,7 +123,8 @@ renderBatch result = unlines $
         visible =
           [ canonicalAtom atom
           | atom <- Set.toAscList (worldToSet world)
-          , batchIncludeInternal options || not (internalAtom atom)
+          , batchIncludeInternal options
+              || not (internalAtom auxiliaryPredicates atom)
           ]
 
 -- | FNV-1a checksum of a complete history using the same canonical byte
@@ -139,12 +154,8 @@ canonicalTerm (TFun name terms) =
   name ++ "(" ++ intercalate "," (map canonicalTerm terms) ++ ")"
 canonicalTerm (TPrev term) = "@" ++ canonicalTerm term
 
-internalAtom :: Atom -> Bool
-internalAtom (Atom "true" []) = True
-internalAtom (Atom "at" _) = True
-internalAtom (Atom name _) = generatedAuxiliary name
-
-generatedAuxiliary :: String -> Bool
-generatedAuxiliary name =
-  let (digits, rest) = span isDigit (reverse name)
-  in not (null digits) && take 4 rest == "xua_"
+internalAtom :: Set Name -> Atom -> Bool
+internalAtom _ (Atom "true" []) = True
+internalAtom _ (Atom "at" _) = True
+internalAtom auxiliaryPredicates (Atom name _) =
+  name `Set.member` auxiliaryPredicates

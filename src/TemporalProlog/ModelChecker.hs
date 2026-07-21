@@ -11,6 +11,7 @@ module TemporalProlog.ModelChecker
   ( CheckNode(..)
   , CheckResult(..)
   , runModelCheck
+  , runModelCheckWithAuxiliaries
   , checkPassed
   , counterexampleTraces
   , renderCheckSummary
@@ -18,7 +19,6 @@ module TemporalProlog.ModelChecker
   ) where
 
 import Control.Monad (foldM, forM)
-import Data.Char (isDigit)
 import Data.List (intercalate, sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
@@ -43,6 +43,7 @@ data CheckResult = CheckResult
   , checkResultNodes          :: [CheckNode]
   , checkResultTerminalNodes  :: [Int]
   , checkResultMaxWidth       :: Int
+  , checkResultAuxiliaryPredicates :: Set Name
   } deriving (Eq, Show)
 
 data ActiveNode = ActiveNode Int InterpreterState
@@ -63,6 +64,17 @@ runModelCheck
   -> Set Name
   -> Either String CheckResult
 runModelCheck scenario program pfNames =
+  runModelCheckWithAuxiliaries scenario program pfNames Set.empty
+
+-- | Model checking with exact normalizer-generated predicate metadata for
+-- user-facing summaries and graphs.
+runModelCheckWithAuxiliaries
+  :: Scenario
+  -> NormalProgram
+  -> Set Name
+  -> Set Name
+  -> Either String CheckResult
+runModelCheckWithAuxiliaries scenario program pfNames auxiliaryPredicates =
   go 0 1 [root] [ActiveNode 0 (newInterpreterState program pfNames)] [] 0
   where
     root = CheckNode 0 Nothing Nothing [] [] []
@@ -74,6 +86,7 @@ runModelCheck scenario program pfNames =
             , checkResultNodes = nodes
             , checkResultTerminalNodes = violatedTerminals ++ map activeId active
             , checkResultMaxWidth = maxWidth
+            , checkResultAuxiliaryPredicates = auxiliaryPredicates
             }
       | otherwise = do
           children <- fmap concat $ mapM (expand step) active
@@ -188,7 +201,10 @@ renderCheckSummary maxCounterexamples includeInternal result =
     renderTraceStep node =
       "  w" ++ show (fromMaybe 0 (checkNodeStep node))
       ++ " assertions=" ++ renderAtoms (checkNodeAssertions node)
-      ++ " facts=" ++ renderAtoms (visibleFacts includeInternal (checkNodeFacts node))
+      ++ " facts=" ++ renderAtoms
+          (visibleFacts includeInternal auxiliaryPredicates (checkNodeFacts node))
+
+    auxiliaryPredicates = checkResultAuxiliaryPredicates result
 
 renderCheckDot :: Bool -> CheckResult -> String
 renderCheckDot includeInternal result = unlines $
@@ -203,13 +219,15 @@ renderCheckDot includeInternal result = unlines $
   where
     nodes = checkResultNodes result
     terminals = Set.fromList (checkResultTerminalNodes result)
+    auxiliaryPredicates = checkResultAuxiliaryPredicates result
     title = scenarioName (checkResultScenario result)
       ++ ": " ++ if checkPassed result then "BOUNDED SAFE" else "UNSAFE"
 
     renderNode node
       | checkNodeId node == 0 = "  n0 [shape=ellipse, label=\"start\"];"
       | otherwise =
-          let facts = visibleFacts includeInternal (checkNodeFacts node)
+          let facts = visibleFacts includeInternal auxiliaryPredicates
+                (checkNodeFacts node)
               violationLines = map ("! " ++) (checkNodeViolations node)
               label = unlinesNoTrailing
                 (("w" ++ show (fromMaybe 0 (checkNodeStep node)))
@@ -231,19 +249,16 @@ renderCheckDot includeInternal result = unlines $
               else " [label=\"" ++ dotEscape assertionLabel ++ "\"]"
         in ["  n" ++ show parent ++ " -> n" ++ show (checkNodeId node) ++ attr ++ ";"]
 
-visibleFacts :: Bool -> [Atom] -> [Atom]
-visibleFacts True = id
-visibleFacts False = filter (not . internalAtom)
+visibleFacts :: Bool -> Set Name -> [Atom] -> [Atom]
+visibleFacts True _ = id
+visibleFacts False auxiliaryPredicates =
+  filter (not . internalAtom auxiliaryPredicates)
 
-internalAtom :: Atom -> Bool
-internalAtom (Atom "true" []) = True
-internalAtom (Atom "at" _) = True
-internalAtom (Atom name _) = generatedAuxiliary name
-
-generatedAuxiliary :: String -> Bool
-generatedAuxiliary name =
-  let (digits, reversedPrefix) = span isDigit (reverse name)
-  in not (null digits) && take 4 reversedPrefix == "xua_"
+internalAtom :: Set Name -> Atom -> Bool
+internalAtom _ (Atom "true" []) = True
+internalAtom _ (Atom "at" _) = True
+internalAtom auxiliaryPredicates (Atom name _) =
+  name `Set.member` auxiliaryPredicates
 
 renderAtoms :: [Atom] -> String
 renderAtoms atoms = "[" ++ intercalate "," (map canonicalAtom atoms) ++ "]"

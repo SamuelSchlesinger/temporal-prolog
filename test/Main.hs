@@ -58,6 +58,11 @@ compileSource src = case parseProgram "<test>" src of
     Left err -> Left err
     Right ((np, pfNames), _warnings) -> Right (np, pfNames)
 
+compileDetailedSource :: String -> Either String NormalizationResult
+compileDetailedSource src = case parseProgram "<test>" src of
+  Left err -> Left (show err)
+  Right program -> normalizeDetailed program
+
 -- Helper: run program for n steps, asserting facts at each step
 -- assertions: list of (worldNum, [atomString]) pairs
 runWithAssertions :: String -> [(Int, [String])] -> Int -> InterpreterState
@@ -207,6 +212,18 @@ normalizerSpec = describe "Normalizer" $ do
           ]
     generatedNames `shouldSatisfy` (not . null)
     generatedNames `shouldSatisfy` all (/= "always_aux0")
+
+  it "records exact generated predicates without classifying source _aux names" $ do
+    case parseProgram "<test>"
+        "user_aux0. always_aux0. trigger => next generated." of
+      Left err -> expectationFailure (show err)
+      Right source -> case normalizeDetailed source of
+        Left err -> expectationFailure err
+        Right normalized -> do
+          normalizedAuxiliaryPredicates normalized
+            `shouldBe` Set.singleton "next_aux1"
+          normalizedAuxiliaryPredicates normalized
+            `shouldSatisfy` Set.notMember "user_aux0"
 
   it "reduces an unconditional atnext result to its trigger rule (paper step 1(4))" $ do
     let np = parseAndNormalize "ready atnext trigger."
@@ -1090,6 +1107,24 @@ batchExecutionSpec = describe "Deterministic branch-preserving batch execution" 
     runBatch unreachable program pfNames `shouldSatisfy` isLeft
     runBatch nonground program pfNames `shouldSatisfy` isLeft
 
+  it "keeps source predicates ending in _auxN visible" $ do
+    case parseProgram "<test>"
+        "user_aux0. always_aux0. trigger => next generated." of
+      Left err -> expectationFailure (show err)
+      Right source -> case normalizeDetailed source of
+        Left err -> expectationFailure err
+        Right normalized -> do
+          let options = BatchOptions 2
+                (Map.singleton 0 [Atom "trigger" []]) False
+          case runBatchWithAuxiliaries options
+              (normalizedProgram normalized)
+              (normalizedPatternFunctions normalized)
+              (normalizedAuxiliaryPredicates normalized) of
+            Left err -> expectationFailure err
+            Right result -> do
+              renderBatch result `shouldContain` "w0=[always_aux0,trigger,user_aux0]"
+              renderBatch result `shouldNotContain` "next_aux1"
+
 modelCheckerSpec :: Spec
 modelCheckerSpec = describe "Portable bounded protocol model checker" $ do
   it "parses schedules and rejects assertions outside the horizon" $ do
@@ -1121,9 +1156,12 @@ modelCheckerSpec = describe "Portable bounded protocol model checker" $ do
     programSource <- readFile "examples/model-checking/arbiter.tpl"
     expectedSummary <- readFile "examples/model-checking/arbiter.expected"
     expectedDot <- readFile "examples/model-checking/arbiter.expected.dot"
-    case (parseScenario "arbiter.tpmc" scenarioSource, compileSource programSource) of
-      (Right scenario, Right (program, pfNames)) ->
-        case runModelCheck scenario program pfNames of
+    case (parseScenario "arbiter.tpmc" scenarioSource, compileDetailedSource programSource) of
+      (Right scenario, Right normalized) ->
+        case runModelCheckWithAuxiliaries scenario
+            (normalizedProgram normalized)
+            (normalizedPatternFunctions normalized)
+            (normalizedAuxiliaryPredicates normalized) of
           Left err -> expectationFailure err
           Right result -> do
             checkPassed result `shouldBe` True
@@ -1139,9 +1177,12 @@ modelCheckerSpec = describe "Portable bounded protocol model checker" $ do
     scenarioSource <- readFile "examples/model-checking/commit-safe.tpmc"
     programSource <- readFile "examples/model-checking/commit.tpl"
     expectedSummary <- readFile "examples/model-checking/commit-safe.expected"
-    case (parseScenario "commit-safe.tpmc" scenarioSource, compileSource programSource) of
-      (Right scenario, Right (program, pfNames)) ->
-        case runModelCheck scenario program pfNames of
+    case (parseScenario "commit-safe.tpmc" scenarioSource, compileDetailedSource programSource) of
+      (Right scenario, Right normalized) ->
+        case runModelCheckWithAuxiliaries scenario
+            (normalizedProgram normalized)
+            (normalizedPatternFunctions normalized)
+            (normalizedAuxiliaryPredicates normalized) of
           Left err -> expectationFailure err
           Right result -> do
             checkPassed result `shouldBe` True
@@ -1155,9 +1196,12 @@ modelCheckerSpec = describe "Portable bounded protocol model checker" $ do
     scenarioSource <- readFile "examples/model-checking/commit-buggy.tpmc"
     programSource <- readFile "examples/model-checking/commit-buggy.tpl"
     expectedSummary <- readFile "examples/model-checking/commit-buggy.expected"
-    case (parseScenario "commit-buggy.tpmc" scenarioSource, compileSource programSource) of
-      (Right scenario, Right (program, pfNames)) ->
-        case runModelCheck scenario program pfNames of
+    case (parseScenario "commit-buggy.tpmc" scenarioSource, compileDetailedSource programSource) of
+      (Right scenario, Right normalized) ->
+        case runModelCheckWithAuxiliaries scenario
+            (normalizedProgram normalized)
+            (normalizedPatternFunctions normalized)
+            (normalizedAuxiliaryPredicates normalized) of
           Left err -> expectationFailure err
           Right result -> do
             checkPassed result `shouldBe` False
@@ -1176,9 +1220,12 @@ modelCheckerSpec = describe "Portable bounded protocol model checker" $ do
           , "invariant no_lookup_fact forbids lookup(key, value)"
           ]
         programSource = "lookup(key) -> value.\n"
-    case (parseScenario "<test>" scenarioSource, compileSource programSource) of
-      (Right scenario, Right (program, pfNames)) ->
-        case runModelCheck scenario program pfNames of
+    case (parseScenario "<test>" scenarioSource, compileDetailedSource programSource) of
+      (Right scenario, Right normalized) ->
+        case runModelCheckWithAuxiliaries scenario
+            (normalizedProgram normalized)
+            (normalizedPatternFunctions normalized)
+            (normalizedAuxiliaryPredicates normalized) of
           Left err -> expectationFailure err
           Right result -> checkPassed result `shouldBe` True
       (Left err, _) -> expectationFailure err
@@ -1194,9 +1241,12 @@ modelCheckerSpec = describe "Portable bounded protocol model checker" $ do
           , "invariant no_bad forbids bad"
           ]
         programSource = "present => bad.\n"
-    case (parseScenario "<test>" scenarioSource, compileSource programSource) of
-      (Right scenario, Right (program, pfNames)) ->
-        case runModelCheck scenario program pfNames of
+    case (parseScenario "<test>" scenarioSource, compileDetailedSource programSource) of
+      (Right scenario, Right normalized) ->
+        case runModelCheckWithAuxiliaries scenario
+            (normalizedProgram normalized)
+            (normalizedPatternFunctions normalized)
+            (normalizedAuxiliaryPredicates normalized) of
           Left err -> expectationFailure err
           Right result -> do
             checkPassed result `shouldBe` False
@@ -1204,6 +1254,31 @@ modelCheckerSpec = describe "Portable bounded protocol model checker" $ do
             length (counterexampleTraces result) `shouldBe` 1
       (Left err, _) -> expectationFailure err
       (_, Left err) -> expectationFailure err
+
+  it "renders source _aux predicates but hides actual generated predicates" $ do
+    let scenarioSource = unlines
+          [ "name auxiliary-visibility"
+          , "program ignored.tpl"
+          , "steps 2"
+          , "assert 0 trigger"
+          , "invariant no_bad forbids bad"
+          ]
+        programSource =
+          "user_aux0. always_aux0. trigger => next generated."
+    case (parseScenario "<test>" scenarioSource, parseProgram "<test>" programSource) of
+      (Right scenario, Right source) -> case normalizeDetailed source of
+        Left err -> expectationFailure err
+        Right normalized -> case runModelCheckWithAuxiliaries scenario
+            (normalizedProgram normalized)
+            (normalizedPatternFunctions normalized)
+            (normalizedAuxiliaryPredicates normalized) of
+          Left err -> expectationFailure err
+          Right result -> do
+            renderCheckDot False result `shouldContain` "user_aux0"
+            renderCheckDot False result `shouldContain` "always_aux0"
+            renderCheckDot False result `shouldNotContain` "next_aux1"
+      (Left err, _) -> expectationFailure err
+      (_, Left err) -> expectationFailure (show err)
 
 propositionalOracleSpec :: Spec
 propositionalOracleSpec = describe "Independent exhaustive propositional oracle" $

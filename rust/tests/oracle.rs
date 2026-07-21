@@ -68,6 +68,7 @@ fn general_evaluator_agrees_with_independent_exhaustive_oracle() {
         let program = NormalizedProgram {
             rules,
             pattern_functions: BTreeSet::new(),
+            auxiliary_predicates: BTreeSet::new(),
         };
         let mut actual = Interpreter::new(program)
             .step_general_all()

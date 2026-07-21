@@ -58,6 +58,10 @@ check_case arithmetic conformance/cases/arithmetic.tpl \
   --assert '0:pair(a,a)' --assert '0:pair(a,b)'
 check_case conditional-reduction conformance/cases/conditional_reduction.tpl \
   --assert '0:enabled(a)' --assert '0:request(a)'
+check_case auxiliary-collision conformance/cases/auxiliary_collision.tpl --steps 2 \
+  --assert 0:trigger
+check_case auxiliary-collision-internal conformance/cases/auxiliary_collision.tpl --steps 2 \
+  --assert 0:trigger --include-internal
 
 reject_case for-zero conformance/rejections/for_zero.tpl
 reject_case missing-period conformance/rejections/missing_period.tpl

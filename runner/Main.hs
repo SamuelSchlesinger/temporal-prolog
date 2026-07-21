@@ -30,11 +30,14 @@ runFile path options = do
     Left err -> die $ "cannot read " ++ path ++ ": " ++ show err
     Right source -> case parseProgram path source of
       Left err -> die (errorBundlePretty err)
-      Right parsed -> case normalize parsed of
+      Right parsed -> case normalizeDetailed parsed of
         Left err -> die err
-        Right ((program, pfNames), warnings) -> do
-          mapM_ (hPutStrLn stderr) warnings
-          case runBatch options program pfNames of
+        Right normalized -> do
+          mapM_ (hPutStrLn stderr) (normalizationWarnings normalized)
+          case runBatchWithAuxiliaries options
+              (normalizedProgram normalized)
+              (normalizedPatternFunctions normalized)
+              (normalizedAuxiliaryPredicates normalized) of
             Left err -> die err
             Right result -> putStr (renderBatch result)
 

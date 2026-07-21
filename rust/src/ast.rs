@@ -134,6 +134,8 @@ pub struct NormalRule {
 pub struct NormalizedProgram {
     pub rules: Vec<NormalRule>,
     pub pattern_functions: BTreeSet<Name>,
+    /// Predicate names introduced by normalization, excluding fresh variables.
+    pub auxiliary_predicates: BTreeSet<Name>,
 }
 
 impl fmt::Display for Term {

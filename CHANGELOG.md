@@ -34,6 +34,10 @@
 * Add a byte-for-byte differential conformance gate spanning all temporal
   operator families, pattern functions, arithmetic, negative cycles, and
   shared rejection cases; run both engines, Clippy, and rustfmt in CI.
+* Track generated predicates as normalization metadata instead of inferring
+  them from `_auxN` spelling, preserving user predicates with similar names in
+  REPL, batch, model-checker, and graph output; align fresh-name allocation
+  across both engines under source-name collisions.
 
 ## 0.1.0.0 -- 2026-03-18
 

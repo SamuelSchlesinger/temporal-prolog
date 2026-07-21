@@ -17,6 +17,7 @@ pub struct CheckResult {
     pub nodes: Vec<CheckNode>,
     pub terminal_nodes: Vec<usize>,
     pub max_width: usize,
+    pub auxiliary_predicates: BTreeSet<String>,
 }
 
 struct ActiveNode {
@@ -38,6 +39,7 @@ pub fn run_model_check(
     scenario: &Scenario,
     program: crate::NormalizedProgram,
 ) -> Result<CheckResult, String> {
+    let auxiliary_predicates = program.auxiliary_predicates.clone();
     let root = CheckNode {
         id: 0,
         parent: None,
@@ -123,6 +125,7 @@ pub fn run_model_check(
         nodes,
         terminal_nodes: violated_terminals,
         max_width,
+        auxiliary_predicates,
     })
 }
 
@@ -202,7 +205,8 @@ impl CheckResult {
                 final_node.id
             ));
             for node in trace {
-                let facts = visible_facts(include_internal, &node.facts);
+                let facts =
+                    visible_facts(include_internal, &self.auxiliary_predicates, &node.facts);
                 lines.push(format!(
                     "  w{} assertions={} facts={}",
                     node.step.unwrap_or(0),
@@ -240,7 +244,7 @@ impl CheckResult {
             }
             let mut label_lines = vec![format!("w{}", node.step.unwrap_or(0))];
             label_lines.extend(
-                visible_facts(include_internal, &node.facts)
+                visible_facts(include_internal, &self.auxiliary_predicates, &node.facts)
                     .iter()
                     .map(canonical_atom),
             );
@@ -297,25 +301,20 @@ fn input_variants(fixed: &[Atom], groups: &[ChoiceGroup]) -> Vec<Vec<Atom>> {
     variants
 }
 
-fn visible_facts(include_internal: bool, facts: &[Atom]) -> Vec<Atom> {
+fn visible_facts(
+    include_internal: bool,
+    auxiliary_predicates: &BTreeSet<String>,
+    facts: &[Atom],
+) -> Vec<Atom> {
     facts
         .iter()
-        .filter(|atom| include_internal || !internal_atom(atom))
+        .filter(|atom| include_internal || !internal_atom(atom, auxiliary_predicates))
         .cloned()
         .collect()
 }
 
-fn internal_atom(atom: &Atom) -> bool {
-    atom.name == "true" || atom.name == "at" || generated_auxiliary(&atom.name)
-}
-
-fn generated_auxiliary(name: &str) -> bool {
-    let digits = name
-        .chars()
-        .rev()
-        .take_while(|character| character.is_ascii_digit())
-        .count();
-    digits > 0 && name[..name.len() - digits].ends_with("_aux")
+fn internal_atom(atom: &Atom, auxiliary_predicates: &BTreeSet<String>) -> bool {
+    atom.name == "true" || atom.name == "at" || auxiliary_predicates.contains(&atom.name)
 }
 
 fn render_atoms(atoms: &[Atom]) -> String {
