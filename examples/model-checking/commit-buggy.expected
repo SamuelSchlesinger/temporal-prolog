@@ -1,0 +1,13 @@
+scenario=atomic-commit-buggy
+steps=4
+nodes=4
+leaves=1
+safe_leaves=0
+max_width=1
+invariants=1
+violations=1
+result=UNSAFE
+counterexample invariant=atomic_decision node=3
+  w0 assertions=[begin(tx1)] facts=[begin(tx1),participant(p1),participant(p2)]
+  w1 assertions=[vote_yes(tx1,p1),vote_no(tx1,p2)] facts=[participant(p1),participant(p2),vote_no(tx1,p2),vote_yes(tx1,p1),voting(tx1)]
+  w2 assertions=[] facts=[aborted(tx1),committed(tx1),decision(tx1,abort),decision(tx1,commit),participant(p1),participant(p2),violation(atomic_decision,tx1)]

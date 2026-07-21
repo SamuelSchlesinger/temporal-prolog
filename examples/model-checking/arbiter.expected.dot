@@ -1,0 +1,22 @@
+digraph temporal_prolog {
+  rankdir=LR;
+  graph [labelloc=t, label="two-client-arbiter: SAFE"];
+  node [shape=box, fontname="monospace"] ;
+  n0 [shape=ellipse, label="start"];
+  n1 [label="w0\ngrant(1)\nrequest(1)\nrequest(2)"];
+  n2 [label="w0\ngrant(2)\nrequest(1)\nrequest(2)"];
+  n3 [label="w1\nowns(1)"];
+  n4 [label="w1\nowns(2)"];
+  n5 [label="w2\nrelease(1)\nrelease(2)"];
+  n6 [label="w2\nrelease(1)\nrelease(2)"];
+  n7 [label="w3", peripheries=2];
+  n8 [label="w3", peripheries=2];
+  n0 -> n1 [label="request(1),request(2)"];
+  n0 -> n2 [label="request(1),request(2)"];
+  n1 -> n3;
+  n2 -> n4;
+  n3 -> n5 [label="release(1),release(2)"];
+  n4 -> n6 [label="release(1),release(2)"];
+  n5 -> n7;
+  n6 -> n8;
+}

@@ -20,6 +20,14 @@ maintainer:      sgschlesinger@gmail.com
 build-type:      Simple
 tested-with:     GHC == 9.6.7
 extra-doc-files: CHANGELOG.md
+extra-source-files:
+    conformance/cases/*.tpl
+    conformance/rejections/*.tpl
+    examples/model-checking/*.tpl
+    examples/model-checking/*.tpmc
+    examples/model-checking/*.expected
+    examples/model-checking/*.expected.dot
+    examples/model-checking/README.md
 
 common warnings
     ghc-options: -Wall
@@ -33,6 +41,8 @@ library
         TemporalProlog.PrettyPrint
         TemporalProlog.Normalizer
         TemporalProlog.Interpreter
+        TemporalProlog.Scenario
+        TemporalProlog.ModelChecker
     build-depends:
         base ^>=4.18.3.0,
         containers,
@@ -77,4 +87,16 @@ executable temporal-prolog-bench
         temporal-prolog,
         containers
     hs-source-dirs:   benchmark
+    default-language: Haskell2010
+
+executable temporal-prolog-check
+    import:           warnings
+    main-is:          Main.hs
+    build-depends:
+        base ^>=4.18.3.0,
+        temporal-prolog,
+        directory,
+        filepath,
+        megaparsec
+    hs-source-dirs:   model-checker
     default-language: Haskell2010

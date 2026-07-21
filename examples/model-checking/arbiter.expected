@@ -1,0 +1,9 @@
+scenario=two-client-arbiter
+steps=4
+nodes=9
+leaves=2
+safe_leaves=2
+max_width=2
+invariants=1
+violations=0
+result=SAFE

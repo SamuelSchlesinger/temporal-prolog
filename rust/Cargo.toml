@@ -17,4 +17,8 @@ path = "src/main.rs"
 name = "temporal-prolog-bench"
 path = "src/bin/bench.rs"
 
+[[bin]]
+name = "temporal-prolog-check-rs"
+path = "src/bin/check.rs"
+
 [dependencies]

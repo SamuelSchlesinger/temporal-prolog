@@ -1,0 +1,11 @@
+% Both minimal grant choices are explored through acquisition and release.
+name two-client-arbiter
+program arbiter.tpl
+steps 4
+
+assert 0 request(1)
+assert 0 request(2)
+assert 2 release(1)
+assert 2 release(2)
+
+invariant mutual_exclusion forbids violation(mutual_exclusion)

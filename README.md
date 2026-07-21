@@ -30,6 +30,8 @@ The project includes a complete [normative specification](output/pdf/temporal-pr
 with explicit errata for inconsistencies in the 1986 paper
 ([LaTeX source](spec/temporal-prolog.tex)).
 Both engines execute the programs in the [shared conformance corpus](conformance/README.md).
+They also provide matching bounded protocol model checkers over a shared
+[scenario format and example suite](examples/model-checking/README.md).
 
 ## Quick start
 
@@ -55,6 +57,30 @@ cargo run --manifest-path rust/Cargo.toml --bin temporal-prolog-rs -- \
 ```
 
 Run `sh benchmarks/run.sh 100` for the matched digest-checked comparison.
+
+### Model-check a protocol
+
+Explore every minimal-model branch of the nondeterministic arbiter and write
+the complete state tree as Graphviz DOT:
+
+```sh
+cabal run temporal-prolog-check -- \
+  examples/model-checking/arbiter.tpmc --dot /tmp/arbiter.dot
+
+cargo run --manifest-path rust/Cargo.toml \
+  --bin temporal-prolog-check-rs -- \
+  examples/model-checking/arbiter.tpmc --dot /tmp/arbiter-rs.dot
+```
+
+Both commands report two safe leaves. Scenarios schedule external facts over a
+finite horizon and declare forbidden fact patterns as invariants. Programs can
+derive `violation(...)` witnesses using the full Temporal Prolog language.
+Unsafe runs print a shortest counterexample and exit with status 2:
+
+```sh
+cabal run temporal-prolog-check -- \
+  examples/model-checking/commit-buggy.tpmc
+```
 
 You will see a prompt like:
 
@@ -357,6 +383,14 @@ The implementation follows a three-phase pipeline:
    External predicates (`=`, `>`, `<`, `>=`, `<=`, `at`, `true`, `false`)
    are evaluated specially.
 
+4. **Model-check** (`TemporalProlog.ModelChecker`): A breadth-first bounded
+   explorer applies each scenario's scheduled assertions to every active
+   branch, calls `stepWorldAll`, checks forbidden atom patterns in every new
+   world, and retains parent links for shortest counterexamples and DOT output.
+   Violating branches stop immediately; safe branches continue to the horizon.
+   The Rust `model_checker` module implements the same algorithm and produces
+   byte-identical summaries and graphs for the shared examples.
+
 At world 0, every previous-time formula `@F` is false, exactly as defined in
 Section 5.2. In particular, `@~p` is false there, while `~@p` is true; the
 normalizer introduces the auxiliary predicate required by Step 4 to preserve
@@ -378,6 +412,8 @@ Supporting modules:
 - `TemporalProlog.Syntax`: Core AST types (user-facing and normalized)
 - `TemporalProlog.Unification`: First-order term unification with occurs check
 - `TemporalProlog.PrettyPrint`: Human-readable display for all AST types
+- `TemporalProlog.Scenario`: Portable schedules and invariant declarations
+- `TemporalProlog.ModelChecker`: Branch exploration, traces, and DOT rendering
 
 ## Notes on negation
 

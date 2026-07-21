@@ -1,0 +1,10 @@
+% A mixed vote exposes the coordinator bug at world 2.
+name atomic-commit-buggy
+program commit-buggy.tpl
+steps 4
+
+assert 0 begin(tx1)
+assert 1 vote_yes(tx1, p1)
+assert 1 vote_no(tx1, p2)
+
+invariant atomic_decision forbids violation(atomic_decision, T)

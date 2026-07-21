@@ -18,6 +18,10 @@
   evaluator, plus a shared cross-language conformance corpus.
 * Add matched, digest-checked Haskell/Rust benchmark harnesses and a normative
   LaTeX specification with paper errata.
+* Add matching Haskell and Rust bounded protocol model checkers with a portable
+  scenario format, invariant checking, shortest counterexample traces, and
+  deterministic Graphviz trees.
+* Add a safe nondeterministic arbiter and safe/buggy atomic-commit examples.
 
 ## 0.1.0.0 -- 2026-03-18
 

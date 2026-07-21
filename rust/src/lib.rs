@@ -3,13 +3,17 @@
 
 pub mod ast;
 pub mod engine;
+pub mod model_checker;
 pub mod normalize;
 pub mod parser;
+pub mod scenario;
 
 pub use ast::*;
 pub use engine::*;
+pub use model_checker::*;
 pub use normalize::*;
 pub use parser::*;
+pub use scenario::*;
 
 /// Parse and normalize a portable source program.
 pub fn compile(source: &str) -> Result<NormalizedProgram, String> {

@@ -10,6 +10,8 @@ import TemporalProlog.Parser
 import TemporalProlog.PrettyPrint
 import TemporalProlog.Normalizer
 import TemporalProlog.Interpreter
+import TemporalProlog.ModelChecker
+import TemporalProlog.Scenario
 import TemporalProlog.Unification
 
 main :: IO ()
@@ -28,6 +30,7 @@ main = hspec $ do
   backwardChainingSpec
   correctnessAndFeatureSpec
   sharedConformanceSpec
+  modelCheckerSpec
 
 -- Helper: parse and normalize a program string
 parseAndNormalize :: String -> NormalProgram
@@ -1056,6 +1059,67 @@ sharedConformanceSpec = describe "Shared Haskell/Rust conformance corpus" $ do
       Left err -> expectationFailure err
       Right (np, pfNames) ->
         stepWorld (newInterpreterState np pfNames) `shouldSatisfy` isLeft
+
+modelCheckerSpec :: Spec
+modelCheckerSpec = describe "Portable bounded protocol model checker" $ do
+  it "parses schedules and rejects assertions outside the horizon" $ do
+    parseScenario "<test>" (unlines
+      [ "name demo"
+      , "program demo.tpl"
+      , "steps 1"
+      , "assert 1 request"
+      ]) `shouldSatisfy` isLeft
+
+  it "explores both safe arbiter choices" $ do
+    scenarioSource <- readFile "examples/model-checking/arbiter.tpmc"
+    programSource <- readFile "examples/model-checking/arbiter.tpl"
+    expectedSummary <- readFile "examples/model-checking/arbiter.expected"
+    expectedDot <- readFile "examples/model-checking/arbiter.expected.dot"
+    case (parseScenario "arbiter.tpmc" scenarioSource, compileSource programSource) of
+      (Right scenario, Right (program, pfNames)) ->
+        case runModelCheck scenario program pfNames of
+          Left err -> expectationFailure err
+          Right result -> do
+            checkPassed result `shouldBe` True
+            length (checkResultNodes result) `shouldBe` 9
+            length (checkResultTerminalNodes result) `shouldBe` 2
+            checkResultMaxWidth result `shouldBe` 2
+            renderCheckSummary 1 False result `shouldBe` expectedSummary
+            renderCheckDot False result `shouldBe` expectedDot
+      (Left err, _) -> expectationFailure err
+      (_, Left err) -> expectationFailure err
+
+  it "accepts the correct atomic-commit coordinator" $ do
+    scenarioSource <- readFile "examples/model-checking/commit-safe.tpmc"
+    programSource <- readFile "examples/model-checking/commit.tpl"
+    expectedSummary <- readFile "examples/model-checking/commit-safe.expected"
+    case (parseScenario "commit-safe.tpmc" scenarioSource, compileSource programSource) of
+      (Right scenario, Right (program, pfNames)) ->
+        case runModelCheck scenario program pfNames of
+          Left err -> expectationFailure err
+          Right result -> do
+            checkPassed result `shouldBe` True
+            length (checkResultNodes result) `shouldBe` 5
+            renderCheckSummary 1 False result `shouldBe` expectedSummary
+      (Left err, _) -> expectationFailure err
+      (_, Left err) -> expectationFailure err
+
+  it "prints the shortest counterexample for the broken coordinator" $ do
+    scenarioSource <- readFile "examples/model-checking/commit-buggy.tpmc"
+    programSource <- readFile "examples/model-checking/commit-buggy.tpl"
+    expectedSummary <- readFile "examples/model-checking/commit-buggy.expected"
+    case (parseScenario "commit-buggy.tpmc" scenarioSource, compileSource programSource) of
+      (Right scenario, Right (program, pfNames)) ->
+        case runModelCheck scenario program pfNames of
+          Left err -> expectationFailure err
+          Right result -> do
+            checkPassed result `shouldBe` False
+            map (map checkNodeStep) (counterexampleTraces result)
+              `shouldBe` [[Just 0, Just 1, Just 2]]
+            renderCheckSummary 1 False result `shouldBe` expectedSummary
+            renderCheckDot False result `shouldContain` "fillcolor=\"#fee2e2\""
+      (Left err, _) -> expectationFailure err
+      (_, Left err) -> expectationFailure err
 
 -- Helper to filter internal atoms
 isInternal :: Atom -> Bool

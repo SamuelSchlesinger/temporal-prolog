@@ -1,0 +1,9 @@
+scenario=atomic-commit-safe
+steps=4
+nodes=5
+leaves=1
+safe_leaves=1
+max_width=1
+invariants=1
+violations=0
+result=SAFE
