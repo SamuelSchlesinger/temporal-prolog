@@ -153,6 +153,12 @@ parserSpec = describe "Parser" $ do
     parseCond "<test>" "a after b" `shouldSatisfy` isRight
     parseCond "<test>" "a for 3" `shouldSatisfy` isRight
 
+  it "requires parentheses for chained past-time operators" $ do
+    parseCond "<test>" "a since b since c" `shouldSatisfy` isLeft
+    parseCond "<test>" "a after b after c" `shouldSatisfy` isLeft
+    parseCond "<test>" "a for 2 after b" `shouldSatisfy` isLeft
+    parseCond "<test>" "(a since b) after c" `shouldSatisfy` isRight
+
   it "parses implication rules" $ do
     parseRule "<test>" "a => b." `shouldSatisfy` isRight
     parseRule "<test>" "a /\\ b => c." `shouldSatisfy` isRight
@@ -165,6 +171,24 @@ parserSpec = describe "Parser" $ do
 
   it "parses until results" $ do
     parseRule "<test>" "a => p until q." `shouldSatisfy` isRight
+
+  it "gives result conjunction precedence over until and atnext" $ do
+    parseRule "<test>" "start => left /\\ right until stop."
+      `shouldBe` Right
+        (Rule [CAtom (Atom "start" [])]
+          (RUntil
+            (RAnd [RAtom (Atom "left" []), RAtom (Atom "right" [])])
+            (CAtom (Atom "stop" []))))
+    parseRule "<test>" "arm => bell /\\ light atnext fire."
+      `shouldBe` Right
+        (Rule [CAtom (Atom "arm" [])]
+          (RAtNext
+            (RAnd [RAtom (Atom "bell" []), RAtom (Atom "light" [])])
+            (CAtom (Atom "fire" []))))
+
+  it "requires parentheses for nested until and atnext results" $ do
+    parseRule "<test>" "p until a until b." `shouldSatisfy` isLeft
+    parseRule "<test>" "p atnext a atnext b." `shouldSatisfy` isLeft
 
   it "parses infix atoms" $ do
     parseCond "<test>" "X > 5" `shouldSatisfy` isRight
@@ -1304,6 +1328,15 @@ sharedConformanceSpec = describe "Shared Haskell/Rust conformance corpus" $ do
       (currentWorld st)
       `shouldBe` False
 
+  it "applies until and atnext to complete result conjunctions" $ do
+    src <- readFile "conformance/cases/result_precedence.tpl"
+    let st = runWithAssertions src
+          [(0, ["start", "arm"]), (1, ["fire"])] 2
+    worldContains st "left" `shouldBe` True
+    worldContains st "right" `shouldBe` True
+    worldContains st "bell" `shouldBe` True
+    worldContains st "light" `shouldBe` True
+
   it "rejects the shared negative corpus at the specified boundaries" $ do
     forZero <- readFile "conformance/rejections/for_zero.tpl"
     plainPrevious <- readFile "conformance/rejections/plain_previous_term.tpl"
@@ -1320,6 +1353,7 @@ sharedConformanceSpec = describe "Shared Haskell/Rust conformance corpus" $ do
       , "builtin_result.tpl"
       , "malformed_builtin.tpl"
       , "malformed_arithmetic.tpl"
+      , "chained_temporal_condition.tpl"
       ] $ \filename -> do
         source <- readFile ("conformance/rejections/" ++ filename)
         compileSource source `shouldSatisfy` isLeft

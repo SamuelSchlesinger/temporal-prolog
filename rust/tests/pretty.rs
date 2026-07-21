@@ -144,6 +144,8 @@ fn every_result_form_round_trips() {
         "always p",
         "next next p",
         "(always p) /\\ (next q)",
+        "p /\\ q until stop",
+        "p /\\ q atnext trigger",
         "(p /\\ q) until (a since b)",
         "p atnext (a after b)",
     ] {

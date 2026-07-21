@@ -130,21 +130,22 @@ item         ::= rule "." | reduction "."
 rule         ::= result | condition "=>" result
 reduction    ::= call "->" term
 
-result       ::= result "/\\" result
-               | "always" result
-               | "next" result
-               | result "until" condition
-               | result "atnext" condition
-               | atom
-               | reduction
+result       ::= result-and
+                 [("until" | "atnext") condition]
+result-and   ::= result-unary ("/\\" result-unary)*
+result-unary ::= "always" result-unary
+               | "next" result-unary
+               | result-atom
+result-atom  ::= atom | reduction | "(" result ")"
 
-condition    ::= condition "/\\" condition
-               | "~" condition | "@" condition
-               | "#" condition | "?" condition
-               | condition "since" condition
-               | condition "after" condition
-               | condition "for" positive-integer
-               | atom | "(" condition ")"
+condition       ::= condition-and
+                    [("since" | "after") condition-and
+                     | "for" positive-integer]
+condition-and   ::= condition-unary ("/\\" condition-unary)*
+condition-unary ::= ("~" | "@" | "#" | "?") condition-unary
+                  | "eventually" condition-unary
+                  | condition-atom
+condition-atom  ::= atom | "(" condition ")"
 
 atom         ::= call | name
                | term ("=" | "!=" | "\\=" | "is"
@@ -159,9 +160,13 @@ term         ::= variable | integer | name | call
 \end{verbatim}
 
 Unary operators bind most tightly.  Condition conjunction binds more tightly
-than \verb|since|, \verb|after|, and \verb|for|.  Implication binds least
-tightly.  Parentheses SHOULD be used when a result combines conjunction with
-\verb|until| or \verb|atnext|.
+than \verb|since|, \verb|after|, and \verb|for|.  Those three binary past-time
+operators are non-associative; chained uses require parentheses.  Within a result,
+\verb|always| and \verb|next| bind most tightly, result conjunction binds next,
+and \verb|until| and \verb|atnext| bind least tightly.  The latter two operators
+are non-associative: nested uses require parentheses.  Thus
+\verb|p /\ q until stop| means \verb|(p /\ q) until stop|.  Implication binds
+least tightly overall.
 
 \begin{table}[ht]
 \centering

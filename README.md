@@ -173,10 +173,24 @@ Use `:history` to see all worlds at once.
 
 ### Operator precedence (tightest to loosest)
 
-1. Unary: `@`, `~`, `#`, `?`
-2. Condition conjunction: `/\`
-3. Binary conditions: `since`, `after`, `for`
+For conditions:
+
+1. Unary: `@`, `~`, `#`, `?`, `eventually`
+2. Conjunction: `/\`
+3. Binary temporal operators: `since`, `after`, `for`
 4. Implication: `=>`
+
+For results:
+
+1. Unary: `always`, `next`
+2. Conjunction: `/\`
+3. Binary temporal operators: `until`, `atnext`
+4. Implication: `=>`
+
+`until` and `atnext` are non-associative, so nested uses require parentheses.
+In particular, `p /\ q until stop` means `(p /\ q) until stop`.
+The binary condition operators `since`, `after`, and `for` are likewise
+non-associative; write `(a since b) after c` when nesting them.
 
 ## Rule syntax
 

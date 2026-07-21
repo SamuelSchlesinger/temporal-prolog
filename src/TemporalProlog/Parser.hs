@@ -18,8 +18,9 @@
 -- always    □         always (henceforth)
 -- @
 --
--- Operator precedence (tightest to loosest):
--- unary (@\@, ~, #, ?) > conjunction (/\\) > binary temporal (since, after, for) > implication (=>) / result binary (until, atnext)
+-- Condition precedence (tightest to loosest):
+-- unary (@\@, ~, #, ?) > conjunction (/\\) > binary temporal (since, after, for) > implication (=>).
+-- Result precedence: unary (always, next) > conjunction (/\\) > binary temporal (until, atnext) > implication (=>).
 --
 -- Comments start with @%@ and extend to end of line.
 module TemporalProlog.Parser
@@ -249,8 +250,9 @@ pInfixAtom = do
 
 -- Condition parsing
 
--- Operator precedence (tightest to loosest):
+-- Condition precedence (tightest to loosest):
 -- unary (@, ~, #, ?) > conjunction (/\) > binary temporal (since, after, for) > implication (=>)
+-- Result precedence: unary (always, next) > conjunction (/\) > binary temporal (until, atnext) > implication (=>)
 pCond :: Parser Cond
 pCond = pCondSinceAfterFor
 
@@ -305,18 +307,11 @@ pNotEqual = do
 -- Result parsing
 
 pResult :: Parser Result
-pResult = pResultAnd
-
-pResultAnd :: Parser Result
-pResultAnd = do
-  rs <- pResultUntilAtNext `sepBy1` opAnd
-  case rs of
-    [r] -> return r
-    _   -> return (RAnd rs)
+pResult = pResultUntilAtNext
 
 pResultUntilAtNext :: Parser Result
 pResultUntilAtNext = do
-  r <- pResultUnary
+  r <- pResultAnd
   rest <- optional $ choice
     [ do kwUntil; c <- pCond; return (RUntil r c)
     , do kwAtNext; c <- pCond; return (RAtNext r c)
@@ -324,6 +319,13 @@ pResultUntilAtNext = do
   case rest of
     Nothing -> return r
     Just r' -> return r'
+
+pResultAnd :: Parser Result
+pResultAnd = do
+  rs <- pResultUnary `sepBy1` opAnd
+  case rs of
+    [r] -> return r
+    _   -> return (RAnd rs)
 
 pResultUnary :: Parser Result
 pResultUnary = choice

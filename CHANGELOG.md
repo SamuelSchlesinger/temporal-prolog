@@ -50,6 +50,10 @@
 * Add public single-term, condition, result, and rule parsers plus a complete
   source-syntax pretty-printer to the Rust crate; enforce parse/print round trips
   in both implementations and preserve top-level temporal-condition scope.
+* Make temporal precedence unambiguous: conjunction binds before
+  non-associative `until` and `atnext`, while `since`, `after`, and `for` are
+  likewise non-associative; align both parsers and enforce the result rule
+  through differential execution.
 
 ## 0.1.0.0 -- 2026-03-18
 

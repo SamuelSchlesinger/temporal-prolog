@@ -260,32 +260,35 @@ impl Parser {
     }
 
     fn parse_condition(&mut self) -> Result<Cond, String> {
-        let mut left = self.parse_condition_and()?;
-        loop {
-            if self.take_keyword("since") {
-                left = Cond::Since(Box::new(left), Box::new(self.parse_condition_and()?));
-            } else if self.take_keyword("after") {
-                left = Cond::After(Box::new(left), Box::new(self.parse_condition_and()?));
-            } else if self.take_keyword("for") {
-                let count = match self.bump() {
-                    Some(Token::Number(number)) => {
-                        number.parse::<usize>().map_err(|e| e.to_string())?
-                    }
-                    found => {
-                        return Err(format!(
-                            "expected positive integer after for, found {found:?}"
-                        ))
-                    }
-                };
-                if count == 0 {
-                    return Err("the right operand of for must be positive".into());
+        let left = self.parse_condition_and()?;
+        if self.take_keyword("since") {
+            Ok(Cond::Since(
+                Box::new(left),
+                Box::new(self.parse_condition_and()?),
+            ))
+        } else if self.take_keyword("after") {
+            Ok(Cond::After(
+                Box::new(left),
+                Box::new(self.parse_condition_and()?),
+            ))
+        } else if self.take_keyword("for") {
+            let count = match self.bump() {
+                Some(Token::Number(number)) => {
+                    number.parse::<usize>().map_err(|e| e.to_string())?
                 }
-                left = Cond::For(Box::new(left), count);
-            } else {
-                break;
+                found => {
+                    return Err(format!(
+                        "expected positive integer after for, found {found:?}"
+                    ))
+                }
+            };
+            if count == 0 {
+                return Err("the right operand of for must be positive".into());
             }
+            Ok(Cond::For(Box::new(left), count))
+        } else {
+            Ok(left)
         }
-        Ok(left)
     }
 
     fn parse_condition_and(&mut self) -> Result<Cond, String> {
@@ -717,6 +720,49 @@ mod tests {
             program.rules[3],
             SourceRule::Rule(_, ResultFormula::Next(_))
         ));
+    }
+
+    #[test]
+    fn result_conjunction_binds_tighter_than_until_and_atnext() {
+        let until = parse_rule("start => left /\\ right until stop.").unwrap();
+        assert!(matches!(
+            until,
+            SourceRule::Rule(
+                _,
+                ResultFormula::Until(result, Cond::Atom(Atom { ref name, .. }))
+            ) if name == "stop"
+                && matches!(*result, ResultFormula::And(ref results) if results.len() == 2)
+        ));
+
+        let atnext = parse_rule("arm => bell /\\ light atnext fire.").unwrap();
+        assert!(matches!(
+            atnext,
+            SourceRule::Rule(
+                _,
+                ResultFormula::AtNext(result, Cond::Atom(Atom { ref name, .. }))
+            ) if name == "fire"
+                && matches!(*result, ResultFormula::And(ref results) if results.len() == 2)
+        ));
+    }
+
+    #[test]
+    fn nested_until_and_atnext_require_parentheses() {
+        assert!(parse_result("p until a until b").is_err());
+        assert!(parse_result("p atnext a atnext b").is_err());
+    }
+
+    #[test]
+    fn chained_past_temporal_operators_require_parentheses() {
+        assert!(parse_condition("a since b since c").is_err());
+        assert!(parse_condition("a after b after c").is_err());
+        assert!(parse_condition("a for 2 after b").is_err());
+        assert!(parse_rule("a since b since c => invalid.").is_err());
+        assert!(parse_program("a since b since c => invalid.").is_err());
+        assert!(parse_program(
+            "% Binary past-time conditions are non-associative.\na since b since c => invalid.\n"
+        )
+        .is_err());
+        assert!(parse_condition("(a since b) after c").is_ok());
     }
 
     #[test]

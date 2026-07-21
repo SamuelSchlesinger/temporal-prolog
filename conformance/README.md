@@ -13,7 +13,9 @@ Rust batch runners with the same scheduled inputs, then compares their complete
 canonical histories and full-state semantic digests byte for byte. It covers
 future and past operators, branching negative cycles, unsupported classical
 blockers, pattern functions, term-level previous, arithmetic, and every shared
-rejection case. Arithmetic coverage includes arbitrary-precision values,
+rejection case. Future-result coverage distinguishes the normative precedence
+of conjunction over `until` and `atnext`. Arithmetic coverage includes
+arbitrary-precision values,
 canonical integer spellings, operator precedence, signed floor division, and
 division-by-zero failure. Adversarial fresh-name cases also verify that source
 predicates ending in `_auxN` remain observable while actual generated
@@ -21,6 +23,8 @@ predicates are hidden unless requested. Negative cases additionally cover
 mixed predicate, constructor, and pattern-function arities; malformed
 pattern-function relational calls; malformed built-in and arithmetic
 signatures; and attempts to define an external built-in as a stored result.
+The negative corpus also rejects unparenthesized chains of non-associative
+past-time condition operators.
 The executable gate also rejects scheduled inputs that change predicate or
 constructor arity, reuse a pattern-function or generated predicate, inject a
 built-in or term-level previous wrapper, or change a dynamically introduced
