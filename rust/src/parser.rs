@@ -500,28 +500,18 @@ fn canonical_integer(source: &str, negative: bool) -> Result<String, String> {
 
 fn term_to_atom(term: Term) -> Result<Atom, String> {
     match term {
-        Term::Fun(name, _) if is_reserved_keyword(&name) => Err(format!(
-            "reserved keyword {name:?} cannot be a predicate name"
+        Term::Fun(name, _) if is_temporal_keyword(&name) => Err(format!(
+            "temporal keyword {name:?} cannot be a callable name"
         )),
         Term::Fun(name, terms) => Ok(Atom::new(name, terms)),
         _ => Err("predicate position must contain a name or call".into()),
     }
 }
 
-fn is_reserved_keyword(name: &str) -> bool {
+fn is_temporal_keyword(name: &str) -> bool {
     matches!(
         name,
-        "since"
-            | "after"
-            | "for"
-            | "eventually"
-            | "always"
-            | "until"
-            | "atnext"
-            | "next"
-            | "is"
-            | "div"
-            | "mod"
+        "since" | "after" | "for" | "eventually" | "always" | "until" | "atnext" | "next"
     )
 }
 
@@ -800,11 +790,37 @@ mod tests {
     }
 
     #[test]
-    fn rejects_reserved_keywords_as_predicates() {
+    fn reserves_only_temporal_keywords_in_callable_position() {
         assert!(parse_atom("since").is_err());
         assert!(parse_atom("always").is_err());
-        assert!(parse_atom("is").is_err());
-        assert!(parse_atom("div").is_err());
+        assert_eq!(parse_atom("is(X, 1)").unwrap().name, "is");
+        assert_eq!(parse_atom("div(a, b)").unwrap().name, "div");
+    }
+
+    #[test]
+    fn accepts_keywords_as_term_constructors() {
+        for source in [
+            "always",
+            "since",
+            "after",
+            "for",
+            "until",
+            "atnext",
+            "eventually",
+            "next",
+            "true",
+            "false",
+            "is",
+        ] {
+            assert_eq!(parse_term(source).unwrap(), constant(source));
+        }
+        assert!(parse_atom("keyword_terms(always, true, is)").is_ok());
+    }
+
+    #[test]
+    fn rejects_non_ascii_identifiers() {
+        assert!(parse_term("Ä").is_err());
+        assert!(parse_atom("π").is_err());
     }
 
     #[test]

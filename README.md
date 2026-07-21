@@ -171,6 +171,19 @@ Use `:history` to see all worlds at once.
 | `atnext` | --   | Result    | `r atnext c` -- r fires when c next holds   |
 | `next`   | `○`  | Result    | **Next** -- holds at the next time step     |
 
+### Names and namespaces
+
+Identifiers are ASCII-only. Variables begin with an uppercase letter; names
+begin with a lowercase letter or underscore. Unicode is accepted only for the
+operator aliases above.
+
+Temporal control words are reserved as predicate and pattern-function names,
+but remain valid constructor names where a term is expected, such as
+`tag(always)` or `payload(true)`. Predicate and constructor namespaces remain
+independent: `div/2` and `mod/2` may be ordinary predicates even though their
+term forms are arithmetic operators. The prefix external forms `true()`,
+`false()`, and `is(L, R)` are accepted and canonicalized by the pretty-printer.
+
 ### Operator precedence (tightest to loosest)
 
 For conditions:

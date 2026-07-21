@@ -127,6 +127,25 @@ parserSpec = describe "Parser" $ do
   it "parses functors" $ do
     parseTerm "<test>" "f(X, Y)" `shouldBe` Right (TFun "f" [TVar "X", TVar "Y"])
 
+  it "accepts keywords as term constructors" $ do
+    forM_
+      [ "always", "since", "after", "for", "until", "atnext"
+      , "eventually", "next", "true", "false", "is"
+      ] $ \name ->
+        parseTerm "<test>" name `shouldBe` Right (TFun name [])
+    parseAtom "<test>" "keyword_terms(always, true, is)"
+      `shouldSatisfy` isRight
+
+  it "reserves temporal keywords only in callable position" $ do
+    parseAtom "<test>" "since" `shouldSatisfy` isLeft
+    parseAtom "<test>" "always" `shouldSatisfy` isLeft
+    parseAtom "<test>" "is(X, 1)" `shouldSatisfy` isRight
+    parseAtom "<test>" "div(a, b)" `shouldSatisfy` isRight
+
+  it "rejects non-ASCII identifiers" $ do
+    parseTerm "<test>" "Ä" `shouldSatisfy` isLeft
+    parseAtom "<test>" "π" `shouldSatisfy` isLeft
+
   it "parses lists" $ do
     parseTerm "<test>" "[]" `shouldBe` Right (TFun "[]" [])
     parseTerm "<test>" "[X|Y]" `shouldBe` Right (TFun "." [TVar "X", TVar "Y"])
@@ -1208,6 +1227,7 @@ correctnessAndFeatureSpec = describe "Temporal operator semantics, parser extens
           , "(X + Y) + Z"
           , "X * (Y + Z)"
           , "7 div 3 mod 2"
+          , "holder(always, true, is)"
           ]
     forM_ sources $ \source -> case parseTerm "<test>" source of
       Left err -> expectationFailure (show err)
@@ -1232,6 +1252,8 @@ correctnessAndFeatureSpec = describe "Temporal operator semantics, parser extens
           , "a since (b /\\ c)"
           , "(a since b) after (c for 2)"
           , "~(a /\\ b)"
+          , "is(X, 2 + 3)"
+          , "true()"
           ]
     forM_ sources $ \source -> case parseCond "<test>" source of
       Left err -> expectationFailure (show err)
@@ -1337,6 +1359,20 @@ sharedConformanceSpec = describe "Shared Haskell/Rust conformance corpus" $ do
     worldContains st "bell" `shouldBe` True
     worldContains st "light" `shouldBe` True
 
+  it "keeps keyword constructors and arithmetic predicate names contextual" $ do
+    keywordSource <- readFile "conformance/cases/keyword_constructors.tpl"
+    let keywordState = runWithAssertions keywordSource [] 1
+    worldContains keywordState
+      "keyword_terms(always,since,after,for,until,atnext,eventually,next,true,false,is)"
+      `shouldBe` True
+    worldContains keywordState "prefix_builtin(5)" `shouldBe` True
+    worldContains keywordState "impossible" `shouldBe` False
+
+    predicateSource <- readFile "conformance/cases/arithmetic_predicates.tpl"
+    let predicateState = runWithAssertions predicateSource
+          [(0, ["div(a,b)", "mod(c,d)"])] 1
+    worldContains predicateState "namespace_ok" `shouldBe` True
+
   it "rejects the shared negative corpus at the specified boundaries" $ do
     forZero <- readFile "conformance/rejections/for_zero.tpl"
     plainPrevious <- readFile "conformance/rejections/plain_previous_term.tpl"
@@ -1354,6 +1390,7 @@ sharedConformanceSpec = describe "Shared Haskell/Rust conformance corpus" $ do
       , "malformed_builtin.tpl"
       , "malformed_arithmetic.tpl"
       , "chained_temporal_condition.tpl"
+      , "non_ascii_identifier.tpl"
       ] $ \filename -> do
         source <- readFile ("conformance/rejections/" ++ filename)
         compileSource source `shouldSatisfy` isLeft

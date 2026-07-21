@@ -54,6 +54,9 @@
   non-associative `until` and `atnext`, while `since`, `after`, and `for` are
   likewise non-associative; align both parsers and enforce the result rule
   through differential execution.
+* Make keyword reservation contextual across disjoint predicate and constructor
+  namespaces, admit prefix external-predicate syntax, and enforce ASCII-only
+  identifiers consistently in both parsers.
 
 ## 0.1.0.0 -- 2026-03-18
 

@@ -52,6 +52,9 @@ check_case future-results-internal conformance/cases/future_results.tpl --steps 
   --assert 0:trigger --assert 2:release --assert 2:stop --include-internal
 check_case result-precedence conformance/cases/result_precedence.tpl --steps 2 \
   --assert 0:start --assert 0:arm --assert 1:fire
+check_case keyword-constructors conformance/cases/keyword_constructors.tpl --steps 1
+check_case arithmetic-predicates conformance/cases/arithmetic_predicates.tpl --steps 1 \
+  --assert '0:div(a,b)' --assert '0:mod(c,d)'
 check_case past-conditions conformance/cases/past_conditions.tpl --steps 3 \
   --assert 0:ready --assert 0:start --assert 0:event --assert 1:ready
 check_case term-previous conformance/cases/term_previous.tpl --steps 2 \
@@ -79,6 +82,7 @@ reject_case builtin-result conformance/rejections/builtin_result.tpl
 reject_case malformed-builtin conformance/rejections/malformed_builtin.tpl
 reject_case malformed-arithmetic conformance/rejections/malformed_arithmetic.tpl
 reject_case chained-temporal-condition conformance/rejections/chained_temporal_condition.tpl
+reject_case non-ascii-identifier conformance/rejections/non_ascii_identifier.tpl
 reject_case asserted-predicate-arity conformance/cases/initial_world.tpl \
   --assert '0:p(x)'
 reject_case asserted-constructor-arity conformance/cases/term_previous.tpl \

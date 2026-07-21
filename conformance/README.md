@@ -24,7 +24,9 @@ mixed predicate, constructor, and pattern-function arities; malformed
 pattern-function relational calls; malformed built-in and arithmetic
 signatures; and attempts to define an external built-in as a stored result.
 The negative corpus also rejects unparenthesized chains of non-associative
-past-time condition operators.
+past-time condition operators and non-ASCII identifiers. Positive lexical
+cases verify contextual keyword reservation and the separation of arithmetic
+term operators from the predicate namespace.
 The executable gate also rejects scheduled inputs that change predicate or
 constructor arity, reuse a pattern-function or generated predicate, inject a
 built-in or term-level previous wrapper, or change a dynamically introduced

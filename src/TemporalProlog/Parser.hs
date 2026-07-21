@@ -34,7 +34,7 @@ module TemporalProlog.Parser
   ) where
 
 import Control.Monad (void)
-import Data.Char (isUpper, isAlphaNum, isLower)
+import Data.Char (isAsciiLower, isAsciiUpper, isDigit)
 import Data.Void
 import Text.Megaparsec
 import Text.Megaparsec.Char
@@ -60,25 +60,36 @@ integer = lexeme L.decimal
 integerLiteral :: Parser Integer
 integerLiteral = lexeme L.decimal
 
--- Keywords
-reserved :: [String]
-reserved = ["since", "after", "for", "until", "atnext", "always", "eventually", "next", "true", "false", "is"]
+-- Formula-control keywords are reserved only in callable position.  The
+-- constructor namespace is separate, so the same spellings remain valid in
+-- unambiguous term positions such as @tag(always)@.
+temporalKeywords :: [String]
+temporalKeywords =
+  ["since", "after", "for", "until", "atnext", "always", "eventually", "next"]
 
--- An atom name: starts with lowercase or is a quoted atom
-atomName :: Parser Name
-atomName = lexeme $ try $ do
-  c <- satisfy (\ch -> isLower ch || ch == '_')
-  cs <- many (satisfy (\ch -> isAlphaNum ch || ch == '_'))
-  let w = c : cs
-  if w `elem` reserved
-    then fail $ "keyword " ++ show w ++ " cannot be used as a predicate name"
-    else return w
+-- An ASCII name: starts with a lowercase letter or underscore.
+identifierName :: Parser Name
+identifierName = lexeme $ do
+  c <- satisfy (\ch -> isAsciiLower ch || ch == '_')
+  cs <- many (satisfy isIdentifierContinuation)
+  return (c : cs)
+
+callableName :: Parser Name
+callableName = try $ do
+  name <- identifierName
+  if name `elem` temporalKeywords
+    then fail $ "temporal keyword " ++ show name ++ " cannot be used as a callable name"
+    else return name
+
+isIdentifierContinuation :: Char -> Bool
+isIdentifierContinuation ch =
+  isAsciiLower ch || isAsciiUpper ch || isDigit ch || ch == '_'
 
 -- A variable: starts with uppercase
 variable :: Parser Var
 variable = lexeme $ try $ do
-  c <- satisfy isUpper
-  cs <- many (satisfy (\ch -> isAlphaNum ch || ch == '_'))
+  c <- satisfy isAsciiUpper
+  cs <- many (satisfy isIdentifierContinuation)
   return (c : cs)
 
 -- Operators: accept both ASCII and Unicode
@@ -108,7 +119,7 @@ opOnce = lexeme (char '?' <|> char '\x25C6')  -- ◆
 keyword :: String -> Parser ()
 keyword w = lexeme $ try $ do
   _ <- string w
-  notFollowedBy (satisfy (\ch -> isAlphaNum ch || ch == '_'))
+  notFollowedBy (satisfy isIdentifierContinuation)
 
 kwAlways :: Parser ()
 kwAlways = keyword "always" <|> void (symbol "\x25A1")  -- □
@@ -187,12 +198,12 @@ pNumber = try $ do
 
 pAtomTerm :: Parser Term
 pAtomTerm = do
-  n <- atomName
+  n <- identifierName
   return (TFun n [])
 
 pFunctor :: Parser Term
 pFunctor = do
-  f <- atomName
+  f <- identifierName
   args <- between (symbol "(") (symbol ")") (pTerm `sepBy` symbol ",")
   return (TFun f args)
 
@@ -222,7 +233,7 @@ pAtom = choice
 
 pPrefixAtom :: Parser Atom
 pPrefixAtom = do
-  p <- atomName
+  p <- callableName
   args <- between (symbol "(") (symbol ")") (pTerm `sepBy` symbol ",")
   return (Atom p args)
 
@@ -230,7 +241,7 @@ pBareAtom :: Parser Atom
 pBareAtom = choice
   [ Atom "true" []  <$ symbol "true"
   , Atom "false" [] <$ symbol "false"
-  , do n <- atomName
+  , do n <- callableName
        return (Atom n [])
   ]
 
@@ -343,7 +354,7 @@ pResultAtom = choice
 
 pPatternFuncResult :: Parser Result
 pPatternFuncResult = do
-  f <- atomName
+  f <- callableName
   args <- between (symbol "(") (symbol ")") (pTerm `sepBy` symbol ",")
   opArrow
   RPatternFunc f args <$> pTerm
@@ -373,7 +384,7 @@ pFactRule = do
 
 pPatternFunc :: Parser PatternFunc
 pPatternFunc = try $ do
-  f <- atomName
+  f <- callableName
   args <- between (symbol "(") (symbol ")") (pTerm `sepBy` symbol ",")
   opArrow
   body <- pTerm

@@ -82,7 +82,21 @@ literals may have a leading minus sign and denote arbitrary-precision
 mathematical integers.  Their spelling is canonicalized by numeric value, so
 \verb|007| denotes the same term as \verb|7| and \verb|-0| denotes
 \verb|0|.  A comment begins with \verb|%| and extends to the end of the line.
-Whitespace and comments separate tokens.
+Whitespace and comments separate tokens.  Identifiers containing non-ASCII
+characters MUST be rejected; Unicode is accepted only for the operator aliases
+listed below.
+
+Keyword reservation is contextual because predicates and constructors occupy
+separate namespaces.  The formula-control words \verb|since|, \verb|after|,
+\verb|for|, \verb|until|, \verb|atnext|, \verb|always|,
+\verb|eventually|, and \verb|next| MUST NOT be used as predicate or pattern-
+function names, but MAY be used as constructor names in term position.  Names
+whose special meaning belongs to only one namespace are not globally reserved.
+In particular, \verb|div| and \verb|mod| MAY be predicate names even though
+their arity-two term forms are arithmetic, while external predicates such as
+\verb|true| and \verb|is| MAY also occur as constructor names inside terms.
+The call spellings \verb|true()| and \verb|false()| are equivalent to their
+bare forms, and \verb|is(L,R)| is equivalent to \verb|L is R|.
 
 The namespaces below are disjoint in the abstract language:
 \[
@@ -595,9 +609,11 @@ A release is conformant only when all of the following are true.
 \begin{enumerate}
   \item Both implementations parse every shared positive corpus case and
   reject every shared negative case.  Rejections include inconsistent symbol
-  arities, malformed pattern-function relational forms, malformed external
-  operation signatures, and external predicates used as results or asserted
-  world facts.  Runtime rejection cases cover signature changes across source,
+  arities, non-ASCII identifiers, malformed pattern-function relational forms,
+  malformed external operation signatures, and external predicates used as
+  results or asserted world facts.  Positive cases exercise contextual keyword
+  reservation across predicate and constructor namespaces.  Runtime rejection
+  cases cover signature changes across source,
   pending input, and history; internal-name injection; term-level previous;
   and malformed arithmetic.  Public-query tests cover every external predicate
   family and its variable bindings.

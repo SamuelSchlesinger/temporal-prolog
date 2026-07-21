@@ -94,6 +94,7 @@ fn every_term_form_round_trips() {
         "(X + Y) + Z",
         "X * (Y + Z)",
         "7 div 3 mod 2",
+        "holder(always, true, is)",
     ] {
         let parsed = parse_term(source).unwrap();
         let rendered = pretty_term(&parsed);
@@ -125,6 +126,8 @@ fn every_condition_form_round_trips() {
         "a since (b /\\ c)",
         "(a since b) after (c for 2)",
         "~(a /\\ b)",
+        "is(X, 2 + 3)",
+        "true()",
     ] {
         let parsed = parse_condition(source).unwrap();
         let rendered = pretty_condition(&parsed);

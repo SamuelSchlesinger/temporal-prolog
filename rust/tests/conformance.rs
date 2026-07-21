@@ -139,6 +139,39 @@ fn result_temporal_operators_scope_over_complete_conjunctions() {
 }
 
 #[test]
+fn contextual_names_follow_their_namespace() {
+    let mut keyword_state = Interpreter::new(
+        compile(include_str!(
+            "../../conformance/cases/keyword_constructors.tpl"
+        ))
+        .unwrap(),
+    );
+    keyword_state.step().unwrap();
+    assert!(keyword_state.world().unwrap().contains(&atom(
+        "keyword_terms(always,since,after,for,until,atnext,eventually,next,true,false,is)"
+    )));
+    assert!(keyword_state
+        .world()
+        .unwrap()
+        .contains(&atom("prefix_builtin(5)")));
+    assert!(!keyword_state.world().unwrap().contains(&atom("impossible")));
+
+    let mut predicate_state = Interpreter::new(
+        compile(include_str!(
+            "../../conformance/cases/arithmetic_predicates.tpl"
+        ))
+        .unwrap(),
+    );
+    predicate_state.assert(atom("div(a,b)")).unwrap();
+    predicate_state.assert(atom("mod(c,d)")).unwrap();
+    predicate_state.step().unwrap();
+    assert!(predicate_state
+        .world()
+        .unwrap()
+        .contains(&atom("namespace_ok")));
+}
+
+#[test]
 fn shared_rejection_cases() {
     assert!(compile(include_str!("../../conformance/rejections/for_zero.tpl")).is_err());
     assert!(compile(include_str!(
@@ -182,6 +215,10 @@ fn shared_rejection_cases() {
         (
             "chained temporal condition",
             include_str!("../../conformance/rejections/chained_temporal_condition.tpl"),
+        ),
+        (
+            "non-ASCII identifier",
+            include_str!("../../conformance/rejections/non_ascii_identifier.tpl"),
         ),
     ] {
         assert!(compile(source).is_err(), "accepted {name}: {source:?}");
