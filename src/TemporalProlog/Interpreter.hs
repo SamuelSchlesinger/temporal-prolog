@@ -42,6 +42,7 @@ module TemporalProlog.Interpreter
   , assertFactEither
   , queryAtom
   , queryAtomEither
+  , worldMatches
   , currentWorld
   , getHistory
   , getWorldNumber
@@ -129,6 +130,11 @@ queryAtomEither pat st =
      else Right $ case currentWorld st of
             Nothing -> []
             Just w  -> matchInWorld pat w
+
+-- | Test whether an atom pattern matches a stored fact in a world.  Unlike
+-- 'queryAtomEither', this never invokes pattern-function relations.
+worldMatches :: Atom -> World -> Bool
+worldMatches patternAtom = not . null . matchInWorld patternAtom
 
 -- | Advance the interpreter by one world
 stepWorld :: InterpreterState -> Either String InterpreterState

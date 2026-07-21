@@ -8,6 +8,8 @@
 -- line-oriented format is also implemented by the Rust engine.
 module TemporalProlog.Scenario
   ( Invariant(..)
+  , ChoiceAlternative(..)
+  , ChoiceGroup(..)
   , Scenario(..)
   , parseScenario
   ) where
@@ -29,11 +31,24 @@ data Invariant = Invariant
   , invariantForbidden :: Atom
   } deriving (Eq, Ord, Show)
 
+data ChoiceAlternative
+  = ChoiceAtom Atom
+  | ChoiceNone
+  deriving (Eq, Ord, Show)
+
+-- | Exactly one alternative in each named group is supplied at its world.
+-- Multiple groups at the same world form a Cartesian product.
+data ChoiceGroup = ChoiceGroup
+  { choiceGroupName         :: String
+  , choiceGroupAlternatives :: [ChoiceAlternative]
+  } deriving (Eq, Ord, Show)
+
 data Scenario = Scenario
   { scenarioName       :: String
   , scenarioProgram    :: FilePath
   , scenarioSteps      :: Int
   , scenarioAssertions :: Map Int [Atom]
+  , scenarioChoices    :: Map Int [ChoiceGroup]
   , scenarioInvariants :: [Invariant]
   } deriving (Eq, Show)
 
@@ -42,12 +57,21 @@ data PartialScenario = PartialScenario
   , partialProgram        :: Maybe FilePath
   , partialSteps          :: Maybe Int
   , partialAssertions     :: Map Int [Atom]
+  , partialChoices        :: Map Int [ChoiceGroup]
   , partialInvariants     :: [Invariant]
   , partialInvariantNames :: Set String
   }
 
 emptyPartial :: PartialScenario
-emptyPartial = PartialScenario Nothing Nothing Nothing Map.empty [] Set.empty
+emptyPartial = PartialScenario
+  { partialName = Nothing
+  , partialProgram = Nothing
+  , partialSteps = Nothing
+  , partialAssertions = Map.empty
+  , partialChoices = Map.empty
+  , partialInvariants = []
+  , partialInvariantNames = Set.empty
+  }
 
 -- | Parse a portable @.tpmc@ scenario.  Directives occupy one line each:
 --
@@ -56,6 +80,8 @@ emptyPartial = PartialScenario Nothing Nothing Nothing Map.empty [] Set.empty
 -- program example.tpl
 -- steps 4
 -- assert 0 request(1)
+-- choose 1 participant vote_yes(tx, participant)
+-- choose 1 participant vote_no(tx, participant)
 -- invariant mutual_exclusion forbids violation(mutual_exclusion)
 -- @
 parseScenario :: FilePath -> String -> Either String Scenario
@@ -65,12 +91,15 @@ parseScenario sourceName source = do
   program <- requireField "program" (partialProgram partial)
   steps <- requireField "steps" (partialSteps partial)
   when (steps <= 0) $ Left "steps must be a positive integer"
-  mapM_ (validateAssertionStep steps) (Map.keys (partialAssertions partial))
+  mapM_ (validateInputStep "assertion" steps) (Map.keys (partialAssertions partial))
+  mapM_ (validateInputStep "choice" steps) (Map.keys (partialChoices partial))
+  mapM_ validateChoiceGroups (Map.toList (partialChoices partial))
   Right Scenario
     { scenarioName = name
     , scenarioProgram = program
     , scenarioSteps = steps
     , scenarioAssertions = partialAssertions partial
+    , scenarioChoices = partialChoices partial
     , scenarioInvariants = partialInvariants partial
     }
   where
@@ -84,10 +113,17 @@ parseScenario sourceName source = do
       (Left . ((sourceName ++ ":" ++ show lineNumber ++ ": ") ++))
       Right
 
-    validateAssertionStep steps step
-      | step < 0 = Left "assertion steps must be non-negative"
-      | step >= steps = Left $ "assertion step " ++ show step
+    validateInputStep kind steps step
+      | step < 0 = Left $ kind ++ " steps must be non-negative"
+      | step >= steps = Left $ kind ++ " step " ++ show step
           ++ " is outside the " ++ show steps ++ "-world horizon"
+      | otherwise = Right ()
+
+    validateChoiceGroups (step, groups) = mapM_ (validateChoiceGroup step) groups
+    validateChoiceGroup step group
+      | length (choiceGroupAlternatives group) < 2 = Left $
+          "choice group '" ++ choiceGroupName group ++ "' at step " ++ show step
+          ++ " must have at least two alternatives"
       | otherwise = Right ()
 
 requireField :: String -> Maybe a -> Either String a
@@ -122,6 +158,22 @@ parseDirective lineNumber line partial =
         { partialAssertions = Map.insertWith (flip (++)) step [atom]
             (partialAssertions partial)
         }
+    "choose" -> do
+      let (stepText, afterStep) = splitWord rest
+          (groupName, alternativeText) = splitWord afterStep
+      when (null stepText || null groupName || null alternativeText) $
+        Left "choose requires STEP GROUP and ATOM or 'none'"
+      step <- maybe (Left "choose step must be an integer") Right (readMaybe stepText)
+      unless (validName groupName) $
+        Left "choice group names may contain only letters, digits, '_' and '-'"
+      alternative <- if alternativeText == "none"
+        then Right ChoiceNone
+        else do
+          atom <- parseScenarioAtom lineNumber alternativeText
+          unless (isGroundAtom atom) $ Left "choice alternatives must be ground"
+          Right (ChoiceAtom atom)
+      choices <- addChoice step groupName alternative (partialChoices partial)
+      Right partial { partialChoices = choices }
     "invariant" -> do
       let (name, afterName) = splitWord rest
           (keyword, atomText) = splitWord afterName
@@ -141,6 +193,26 @@ parseDirective lineNumber line partial =
     parseScenarioAtom n text = case parseAtom ("<scenario line " ++ show n ++ ">") text of
       Left err -> Left $ "invalid atom:\n" ++ errorBundlePretty err
       Right atom -> Right atom
+
+addChoice
+  :: Int
+  -> String
+  -> ChoiceAlternative
+  -> Map Int [ChoiceGroup]
+  -> Either String (Map Int [ChoiceGroup])
+addChoice step groupName alternative choices = do
+  groups <- case Map.lookup step choices of
+    Nothing -> Right [ChoiceGroup groupName [alternative]]
+    Just existing -> update existing
+  Right (Map.insert step groups choices)
+  where
+    update [] = Right [ChoiceGroup groupName [alternative]]
+    update (group:rest)
+      | choiceGroupName group /= groupName = (group :) <$> update rest
+      | alternative `elem` choiceGroupAlternatives group = Left $
+          "duplicate alternative in choice group '" ++ groupName ++ "'"
+      | otherwise = Right
+          (group { choiceGroupAlternatives = choiceGroupAlternatives group ++ [alternative] } : rest)
 
 ensureUnset :: String -> Maybe a -> Either String ()
 ensureUnset _ Nothing = Right ()

@@ -31,6 +31,7 @@ main = hspec $ do
   correctnessAndFeatureSpec
   sharedConformanceSpec
   modelCheckerSpec
+  propositionalOracleSpec
 
 -- Helper: parse and normalize a program string
 parseAndNormalize :: String -> NormalProgram
@@ -1070,6 +1071,22 @@ modelCheckerSpec = describe "Portable bounded protocol model checker" $ do
       , "assert 1 request"
       ]) `shouldSatisfy` isLeft
 
+  it "parses independent input-choice groups" $ do
+    let source = unlines
+          [ "name choices"
+          , "program choices.tpl"
+          , "steps 2"
+          , "choose 1 p1 yes(p1)"
+          , "choose 1 p1 no(p1)"
+          , "choose 1 p2 yes(p2)"
+          , "choose 1 p2 none"
+          ]
+    case parseScenario "<test>" source of
+      Left err -> expectationFailure err
+      Right scenario -> case Map.lookup 1 (scenarioChoices scenario) of
+        Nothing -> expectationFailure "missing parsed choice groups"
+        Just groups -> map (length . choiceGroupAlternatives) groups `shouldBe` [2, 2]
+
   it "explores both safe arbiter choices" $ do
     scenarioSource <- readFile "examples/model-checking/arbiter.tpmc"
     programSource <- readFile "examples/model-checking/arbiter.tpl"
@@ -1099,7 +1116,8 @@ modelCheckerSpec = describe "Portable bounded protocol model checker" $ do
           Left err -> expectationFailure err
           Right result -> do
             checkPassed result `shouldBe` True
-            length (checkResultNodes result) `shouldBe` 5
+            length (checkResultNodes result) `shouldBe` 14
+            length (checkResultTerminalNodes result) `shouldBe` 4
             renderCheckSummary 1 False result `shouldBe` expectedSummary
       (Left err, _) -> expectationFailure err
       (_, Left err) -> expectationFailure err
@@ -1115,11 +1133,108 @@ modelCheckerSpec = describe "Portable bounded protocol model checker" $ do
           Right result -> do
             checkPassed result `shouldBe` False
             map (map checkNodeStep) (counterexampleTraces result)
-              `shouldBe` [[Just 0, Just 1, Just 2]]
+              `shouldBe` replicate 2 [Just 0, Just 1, Just 2]
             renderCheckSummary 1 False result `shouldBe` expectedSummary
             renderCheckDot False result `shouldContain` "fillcolor=\"#fee2e2\""
       (Left err, _) -> expectationFailure err
       (_, Left err) -> expectationFailure err
+
+  it "matches invariants against stored facts, not pattern-function queries" $ do
+    let scenarioSource = unlines
+          [ "name fact-only-invariant"
+          , "program ignored.tpl"
+          , "steps 1"
+          , "invariant no_lookup_fact forbids lookup(key, value)"
+          ]
+        programSource = "lookup(key) -> value.\n"
+    case (parseScenario "<test>" scenarioSource, compileSource programSource) of
+      (Right scenario, Right (program, pfNames)) ->
+        case runModelCheck scenario program pfNames of
+          Left err -> expectationFailure err
+          Right result -> checkPassed result `shouldBe` True
+      (Left err, _) -> expectationFailure err
+      (_, Left err) -> expectationFailure err
+
+  it "explores an explicit no-input alternative" $ do
+    let scenarioSource = unlines
+          [ "name optional-input"
+          , "program ignored.tpl"
+          , "steps 1"
+          , "choose 0 event present"
+          , "choose 0 event none"
+          , "invariant no_bad forbids bad"
+          ]
+        programSource = "present => bad.\n"
+    case (parseScenario "<test>" scenarioSource, compileSource programSource) of
+      (Right scenario, Right (program, pfNames)) ->
+        case runModelCheck scenario program pfNames of
+          Left err -> expectationFailure err
+          Right result -> do
+            checkPassed result `shouldBe` False
+            length (checkResultNodes result) `shouldBe` 3
+            length (counterexampleTraces result) `shouldBe` 1
+      (Left err, _) -> expectationFailure err
+      (_, Left err) -> expectationFailure err
+
+propositionalOracleSpec :: Spec
+propositionalOracleSpec = describe "Independent exhaustive propositional oracle" $
+  it "agrees with the general evaluator on 1024 two-atom programs" $ do
+    let atomA = Atom "a" []
+        atomB = Atom "b" []
+        falseAtom = Atom "false" []
+        positive atom = NormalCond 0 False atom
+        negative atom = NormalCond 0 True atom
+        structural =
+          [ NormalRule [positive atomA, positive falseAtom] atomB
+          , NormalRule [positive atomB, positive falseAtom] atomA
+          ]
+        optional =
+          [ NormalRule [] atomA
+          , NormalRule [] atomB
+          , NormalRule [negative atomA] atomA
+          , NormalRule [negative atomB] atomB
+          , NormalRule [negative atomB] atomA
+          , NormalRule [negative atomA] atomB
+          , NormalRule [positive atomA] atomB
+          , NormalRule [positive atomB] atomA
+          , NormalRule [positive atomA, negative atomB] atomB
+          , NormalRule [positive atomB, negative atomA] atomA
+          ]
+        programs = map (structural ++) (allSubsets optional)
+        universe = Set.fromList [atomA, atomB]
+        oracle program =
+          let proposed = map Set.fromList (allSubsets [atomA, atomB])
+              models = filter (oracleModel program) proposed
+          in [ model
+             | model <- models
+             , not (any (\other -> other `Set.isProperSubsetOf` model) models)
+             ]
+        engine program = case stepWorldGeneralAll
+          (newInterpreterState program Set.empty) of
+            Left err -> Left err
+            Right states -> Right
+              [ Set.intersection universe (maybe Set.empty worldToSet (currentWorld state))
+              | state <- states
+              ]
+    mapM_ (\(index, program) -> case engine program of
+      Left err -> expectationFailure $ "program " ++ show index ++ ": " ++ err
+      Right actual -> actual `shouldMatchList` oracle program)
+      (zip [0 :: Int ..] programs)
+  where
+    oracleModel program world = all (oracleRule world) program
+    oracleRule world (NormalRule conditions headAtom) =
+      not (all (oracleCondition world) conditions) || headAtom `Set.member` world
+    oracleCondition world (NormalCond _ negated atom)
+      | atom == Atom "false" [] = negated
+      | atom == Atom "true" [] = not negated
+      | negated = atom `Set.notMember` world
+      | otherwise = atom `Set.member` world
+
+allSubsets :: [a] -> [[a]]
+allSubsets [] = [[]]
+allSubsets (item:rest) =
+  let suffixes = allSubsets rest
+  in suffixes ++ map (item :) suffixes
 
 -- Helper to filter internal atoms
 isInternal :: Atom -> Bool

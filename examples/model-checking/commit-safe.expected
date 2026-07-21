@@ -1,9 +1,10 @@
 scenario=atomic-commit-safe
 steps=4
-nodes=5
-leaves=1
-safe_leaves=1
-max_width=1
+nodes=14
+leaves=4
+safe_leaves=4
+max_width=4
+input_mode=configured-choices
 invariants=1
 violations=0
-result=SAFE
+result=BOUNDED_SAFE

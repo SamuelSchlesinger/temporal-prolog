@@ -72,10 +72,11 @@ cargo run --manifest-path rust/Cargo.toml \
   examples/model-checking/arbiter.tpmc --dot /tmp/arbiter-rs.dot
 ```
 
-Both commands report two safe leaves. Scenarios schedule external facts over a
-finite horizon and declare forbidden fact patterns as invariants. Programs can
-derive `violation(...)` witnesses using the full Temporal Prolog language.
-Unsafe runs print a shortest counterexample and exit with status 2:
+Both commands report two bounded-safe leaves. Scenarios schedule fixed external
+facts, enumerate named input-choice groups over a finite horizon, and declare
+forbidden stored-fact patterns as invariants. Programs can derive
+`violation(...)` witnesses using the full Temporal Prolog language. Unsafe runs
+print a shortest counterexample and exit with status 2:
 
 ```sh
 cabal run temporal-prolog-check -- \
@@ -384,10 +385,12 @@ The implementation follows a three-phase pipeline:
    are evaluated specially.
 
 4. **Model-check** (`TemporalProlog.ModelChecker`): A breadth-first bounded
-   explorer applies each scenario's scheduled assertions to every active
-   branch, calls `stepWorldAll`, checks forbidden atom patterns in every new
-   world, and retains parent links for shortest counterexamples and DOT output.
-   Violating branches stop immediately; safe branches continue to the horizon.
+   explorer applies every Cartesian product of configured input choices to
+   every active branch, calls `stepWorldAll`, checks forbidden stored-fact
+   patterns in every new world, and retains parent links for shortest
+   counterexamples and DOT output. Violating branches stop immediately;
+   nonviolating branches continue to the horizon. A successful result is
+   reported as `BOUNDED_SAFE`, never as an unqualified global safety proof.
    The Rust `model_checker` module implements the same algorithm and produces
    byte-identical summaries and graphs for the shared examples.
 
@@ -401,6 +404,10 @@ forward rules. Resource limits and unsafe rules are reported as errors rather
 than being treated as logical failure. The independent Rust crate in `rust/`
 implements the same parser, normalization, backward chainer, stratified fast
 path, and general minimal-model evaluator.
+
+As an independent check on the shared transition semantics, both test suites
+compare the general evaluator against a direct exhaustive truth-table oracle
+over all 1,024 programs generated from a ten-rule, two-atom basis.
 
 One additional paper bug is observable: the Section 4.7 assignment clauses
 have three classical minimal models, not the claimed two. The third contains

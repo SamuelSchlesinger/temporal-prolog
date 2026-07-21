@@ -22,6 +22,13 @@
   scenario format, invariant checking, shortest counterexample traces, and
   deterministic Graphviz trees.
 * Add a safe nondeterministic arbiter and safe/buggy atomic-commit examples.
+* Scope successful model-checking results as `BOUNDED_SAFE`, add independent
+  named environment-choice groups (including explicit no-input alternatives),
+  and exhaust all four valid two-participant vote combinations.
+* Make invariants match stored world facts only, not backward-chained
+  pattern-function queries.
+* Cross-check each general evaluator against an independent exhaustive oracle
+  over 1,024 generated two-atom programs.
 
 ## 0.1.0.0 -- 2026-03-18
 

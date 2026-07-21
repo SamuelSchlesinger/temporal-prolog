@@ -3,9 +3,9 @@
 -- Description : Bounded branching protocol model checker
 --
 -- Explores every minimal-model branch admitted by a scenario.  Each safety
--- invariant names a forbidden atom pattern; a branch terminates at the first
--- matching world and can be rendered as a counterexample trace.  Exploration
--- is deliberately bounded because the underlying language may have an
+-- invariant names a forbidden stored-fact pattern; a branch terminates at the
+-- first matching world and can be rendered as a counterexample trace.
+-- Exploration is deliberately bounded because the underlying language may have an
 -- infinite state space.
 module TemporalProlog.ModelChecker
   ( CheckNode(..)
@@ -89,27 +89,36 @@ runModelCheck scenario program pfNames =
 
     activeId (ActiveNode identifier _) = identifier
 
-    expand step (ActiveNode parent state) = do
-      let assertions = Map.findWithDefault [] step (scenarioAssertions scenario)
-      asserted <- foldM (flip assertFactEither) state assertions
-      branches <- stepWorldAll asserted
-      let ordered = sortOn branchKey branches
-      forM ordered $ \branch -> do
-        violations <- violatedInvariants branch
-        let facts = maybe [] (Set.toAscList . worldToSet) (currentWorld branch)
-        Right Child
-          { childParent = parent
-          , childState = branch
-          , childAssertions = assertions
-          , childFacts = facts
-          , childViolations = violations
-          }
+    expand step (ActiveNode parent state) = fmap concat $ mapM expandInput inputVariants
+      where
+        fixedAssertions = Map.findWithDefault [] step (scenarioAssertions scenario)
+        groups = Map.findWithDefault [] step (scenarioChoices scenario)
+        inputVariants = map (fixedAssertions ++) (choiceVariants groups)
+
+        expandInput assertions = do
+          asserted <- foldM (flip assertFactEither) state assertions
+          branches <- stepWorldAll asserted
+          let ordered = sortOn branchKey branches
+          forM ordered $ \branch ->
+            let violations = violatedInvariants branch
+                facts = maybe [] (Set.toAscList . worldToSet) (currentWorld branch)
+            in Right Child
+              { childParent = parent
+              , childState = branch
+              , childAssertions = assertions
+              , childFacts = facts
+              , childViolations = violations
+              }
 
     branchKey = maybe Set.empty worldToSet . currentWorld
 
-    violatedInvariants state = fmap concat $ forM (scenarioInvariants scenario) $ \invariant -> do
-      matches <- queryAtomEither (invariantForbidden invariant) state
-      Right [invariantName invariant | not (null matches)]
+    violatedInvariants state = case currentWorld state of
+      Nothing -> []
+      Just world ->
+        [ invariantName invariant
+        | invariant <- scenarioInvariants scenario
+        , worldMatches (invariantForbidden invariant) world
+        ]
 
     assign identifier child =
       let node = CheckNode
@@ -161,9 +170,10 @@ renderCheckSummary maxCounterexamples includeInternal result =
       , "leaves=" ++ show (length (checkResultTerminalNodes result))
       , "safe_leaves=" ++ show safeLeaves
       , "max_width=" ++ show (checkResultMaxWidth result)
+      , "input_mode=" ++ inputMode scenario
       , "invariants=" ++ show (length (scenarioInvariants scenario))
       , "violations=" ++ show (length violationNodes)
-      , "result=" ++ if checkPassed result then "SAFE" else "UNSAFE"
+      , "result=" ++ resultLabel result
       ]
     selected = take (max 0 maxCounterexamples) (counterexampleTraces result)
 
@@ -194,7 +204,7 @@ renderCheckDot includeInternal result = unlines $
     nodes = checkResultNodes result
     terminals = Set.fromList (checkResultTerminalNodes result)
     title = scenarioName (checkResultScenario result)
-      ++ ": " ++ if checkPassed result then "SAFE" else "UNSAFE"
+      ++ ": " ++ if checkPassed result then "BOUNDED SAFE" else "UNSAFE"
 
     renderNode node
       | checkNodeId node == 0 = "  n0 [shape=ellipse, label=\"start\"];"
@@ -267,3 +277,24 @@ dotEscape = concatMap escape
 
 unlinesNoTrailing :: [String] -> String
 unlinesNoTrailing = intercalate "\n"
+
+choiceVariants :: [ChoiceGroup] -> [[Atom]]
+choiceVariants [] = [[]]
+choiceVariants (group:rest) =
+  [ alternativeAtoms alternative ++ suffix
+  | alternative <- choiceGroupAlternatives group
+  , suffix <- choiceVariants rest
+  ]
+  where
+    alternativeAtoms (ChoiceAtom atom) = [atom]
+    alternativeAtoms ChoiceNone = []
+
+inputMode :: Scenario -> String
+inputMode scenario
+  | Map.null (scenarioChoices scenario) = "fixed-schedule"
+  | otherwise = "configured-choices"
+
+resultLabel :: CheckResult -> String
+resultLabel result
+  | checkPassed result = "BOUNDED_SAFE"
+  | otherwise = "UNSAFE"

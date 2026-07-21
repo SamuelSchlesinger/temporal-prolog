@@ -445,6 +445,12 @@ fn match_world(pattern: &Atom, world: &World) -> Vec<Subst> {
         .collect()
 }
 
+/// Return whether a pattern matches a stored world fact. Unlike
+/// `Interpreter::query`, this never invokes pattern-function relations.
+pub fn world_matches(pattern: &Atom, world: &World) -> bool {
+    !match_world(pattern, world).is_empty()
+}
+
 fn evaluate_external(atom: &Atom, n: usize) -> Option<Vec<Subst>> {
     match (atom.name.as_str(), atom.terms.as_slice()) {
         ("true", []) => Some(vec![Subst::new()]),

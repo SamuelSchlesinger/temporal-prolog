@@ -1,4 +1,4 @@
-use crate::{Atom, Interpreter, Scenario, Term};
+use crate::{world_matches, Atom, ChoiceAlternative, ChoiceGroup, Interpreter, Scenario, Term};
 use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -58,34 +58,37 @@ pub fn run_model_check(
         if active.is_empty() {
             break;
         }
-        let assertions = scenario.assertions.get(&step).cloned().unwrap_or_default();
+        let fixed_assertions = scenario.assertions.get(&step).cloned().unwrap_or_default();
+        let groups = scenario.choices.get(&step).cloned().unwrap_or_default();
+        let input_variants = input_variants(&fixed_assertions, &groups);
         let mut children = Vec::new();
         for active_node in active {
-            let mut asserted = active_node.interpreter;
-            for atom in &assertions {
-                asserted.assert(atom.clone())?;
-            }
-            let mut branches = asserted.step_all()?;
-            branches.sort_by_key(|branch| branch.world().cloned().unwrap_or_default());
-            for branch in branches {
-                let mut violations = Vec::new();
-                for invariant in &scenario.invariants {
-                    if !branch.query(&invariant.forbidden)?.is_empty() {
-                        violations.push(invariant.name.clone());
-                    }
+            for assertions in &input_variants {
+                let mut asserted = active_node.interpreter.clone();
+                for atom in assertions {
+                    asserted.assert(atom.clone())?;
                 }
-                let facts = branch
-                    .world()
-                    .into_iter()
-                    .flat_map(|world| world.iter().cloned())
-                    .collect();
-                children.push(Child {
-                    parent: active_node.node_id,
-                    interpreter: branch,
-                    assertions: assertions.clone(),
-                    facts,
-                    violations,
-                });
+                let mut branches = asserted.step_all()?;
+                branches.sort_by_key(|branch| branch.world().cloned().unwrap_or_default());
+                for branch in branches {
+                    let world = branch
+                        .world()
+                        .expect("a successful step always creates a world");
+                    let violations = scenario
+                        .invariants
+                        .iter()
+                        .filter(|invariant| world_matches(&invariant.forbidden, world))
+                        .map(|invariant| invariant.name.clone())
+                        .collect();
+                    let facts = world.iter().cloned().collect();
+                    children.push(Child {
+                        parent: active_node.node_id,
+                        interpreter: branch,
+                        assertions: assertions.clone(),
+                        facts,
+                        violations,
+                    });
+                }
             }
         }
 
@@ -168,9 +171,24 @@ impl CheckResult {
             format!("leaves={}", self.terminal_nodes.len()),
             format!("safe_leaves={safe_leaves}"),
             format!("max_width={}", self.max_width),
+            format!(
+                "input_mode={}",
+                if self.scenario.choices.is_empty() {
+                    "fixed-schedule"
+                } else {
+                    "configured-choices"
+                }
+            ),
             format!("invariants={}", self.scenario.invariants.len()),
             format!("violations={violation_nodes}"),
-            format!("result={}", if self.passed() { "SAFE" } else { "UNSAFE" }),
+            format!(
+                "result={}",
+                if self.passed() {
+                    "BOUNDED_SAFE"
+                } else {
+                    "UNSAFE"
+                }
+            ),
         ];
         for trace in self
             .counterexample_traces()
@@ -205,7 +223,11 @@ impl CheckResult {
                 dot_escape(&format!(
                     "{}: {}",
                     self.scenario.name,
-                    if self.passed() { "SAFE" } else { "UNSAFE" }
+                    if self.passed() {
+                        "BOUNDED SAFE"
+                    } else {
+                        "UNSAFE"
+                    }
                 ))
             ),
             "  node [shape=box, fontname=\"monospace\"] ;".to_string(),
@@ -255,6 +277,24 @@ impl CheckResult {
         lines.push("}".into());
         lines.join("\n") + "\n"
     }
+}
+
+fn input_variants(fixed: &[Atom], groups: &[ChoiceGroup]) -> Vec<Vec<Atom>> {
+    let mut variants = vec![fixed.to_vec()];
+    for group in groups {
+        let mut expanded = Vec::new();
+        for prefix in variants {
+            for alternative in &group.alternatives {
+                let mut next = prefix.clone();
+                if let ChoiceAlternative::Atom(atom) = alternative {
+                    next.push(atom.clone());
+                }
+                expanded.push(next);
+            }
+        }
+        variants = expanded;
+    }
+    variants
 }
 
 fn visible_facts(include_internal: bool, facts: &[Atom]) -> Vec<Atom> {

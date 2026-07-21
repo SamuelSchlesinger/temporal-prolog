@@ -1,6 +1,6 @@
 digraph temporal_prolog {
   rankdir=LR;
-  graph [labelloc=t, label="two-client-arbiter: SAFE"];
+  graph [labelloc=t, label="two-client-arbiter: BOUNDED SAFE"];
   node [shape=box, fontname="monospace"] ;
   n0 [shape=ellipse, label="start"];
   n1 [label="w0\ngrant(1)\nrequest(1)\nrequest(2)"];

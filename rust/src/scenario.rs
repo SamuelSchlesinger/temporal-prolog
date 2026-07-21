@@ -8,11 +8,24 @@ pub struct Invariant {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ChoiceAlternative {
+    Atom(Atom),
+    None,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ChoiceGroup {
+    pub name: String,
+    pub alternatives: Vec<ChoiceAlternative>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Scenario {
     pub name: String,
     pub program: String,
     pub steps: usize,
     pub assertions: BTreeMap<usize, Vec<Atom>>,
+    pub choices: BTreeMap<usize, Vec<ChoiceGroup>>,
     pub invariants: Vec<Invariant>,
 }
 
@@ -22,6 +35,7 @@ struct PartialScenario {
     program: Option<String>,
     steps: Option<usize>,
     assertions: BTreeMap<usize, Vec<Atom>>,
+    choices: BTreeMap<usize, Vec<ChoiceGroup>>,
     invariants: Vec<Invariant>,
     invariant_names: BTreeSet<String>,
 }
@@ -59,12 +73,28 @@ pub fn parse_scenario(source_name: &str, source: &str) -> Result<Scenario, Strin
             ));
         }
     }
+    for (step, groups) in &partial.choices {
+        if *step >= steps {
+            return Err(format!(
+                "choice step {step} is outside the {steps}-world horizon"
+            ));
+        }
+        for group in groups {
+            if group.alternatives.len() < 2 {
+                return Err(format!(
+                    "choice group '{}' at step {step} must have at least two alternatives",
+                    group.name
+                ));
+            }
+        }
+    }
 
     Ok(Scenario {
         name,
         program,
         steps,
         assertions: partial.assertions,
+        choices: partial.choices,
         invariants: partial.invariants,
     })
 }
@@ -117,6 +147,33 @@ fn parse_directive(
             }
             partial.assertions.entry(step).or_default().push(atom);
         }
+        "choose" => {
+            let (step, after_step) = split_word(rest);
+            let (group_name, alternative_source) = split_word(after_step);
+            if step.is_empty() || group_name.is_empty() || alternative_source.is_empty() {
+                return Err("choose requires STEP GROUP and ATOM or 'none'".into());
+            }
+            let step = step
+                .parse::<usize>()
+                .map_err(|_| "choose step must be an integer")?;
+            if !valid_name(group_name) {
+                return Err(
+                    "choice group names may contain only letters, digits, '_' and '-'".into(),
+                );
+            }
+            let alternative = if alternative_source == "none" {
+                ChoiceAlternative::None
+            } else {
+                let atom = parse_atom(alternative_source).map_err(|error| {
+                    format!("invalid atom on scenario line {line_number}: {error}")
+                })?;
+                if !atom.ground() {
+                    return Err("choice alternatives must be ground".into());
+                }
+                ChoiceAlternative::Atom(atom)
+            };
+            add_choice(&mut partial.choices, step, group_name, alternative)?;
+        }
         "invariant" => {
             let (name, after_name) = split_word(rest);
             let (keyword, atom_source) = split_word(after_name);
@@ -137,6 +194,29 @@ fn parse_directive(
             });
         }
         _ => return Err(format!("unknown directive '{directive}'")),
+    }
+    Ok(())
+}
+
+fn add_choice(
+    choices: &mut BTreeMap<usize, Vec<ChoiceGroup>>,
+    step: usize,
+    group_name: &str,
+    alternative: ChoiceAlternative,
+) -> Result<(), String> {
+    let groups = choices.entry(step).or_default();
+    if let Some(group) = groups.iter_mut().find(|group| group.name == group_name) {
+        if group.alternatives.contains(&alternative) {
+            return Err(format!(
+                "duplicate alternative in choice group '{group_name}'"
+            ));
+        }
+        group.alternatives.push(alternative);
+    } else {
+        groups.push(ChoiceGroup {
+            name: group_name.to_string(),
+            alternatives: vec![alternative],
+        });
     }
     Ok(())
 }
@@ -185,6 +265,19 @@ mod tests {
         assert_eq!(scenario.steps, 2);
         assert_eq!(scenario.assertions[&0].len(), 1);
         assert_eq!(scenario.invariants.len(), 1);
+    }
+
+    #[test]
+    fn parses_independent_choice_groups() {
+        let scenario = parse_scenario(
+            "test.tpmc",
+            "name demo\nprogram demo.tpl\nsteps 2\n\
+             choose 1 p1 yes(p1)\nchoose 1 p1 no(p1)\n\
+             choose 1 p2 yes(p2)\nchoose 1 p2 none\n",
+        )
+        .unwrap();
+        assert_eq!(scenario.choices[&1].len(), 2);
+        assert_eq!(scenario.choices[&1][0].alternatives.len(), 2);
     }
 
     #[test]
