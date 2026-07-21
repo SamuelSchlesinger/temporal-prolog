@@ -235,6 +235,40 @@ fn positive_conditions_may_ground_pattern_function_outputs() {
 }
 
 #[test]
+fn arithmetic_waits_for_the_condition_that_grounds_its_input() {
+    let mut state = state("value(4). Y is X + 1 /\\ value(X) => result(Y).");
+    state.step().unwrap();
+    assert!(contains(&state, "result(5)"));
+}
+
+#[test]
+fn pattern_calls_wait_for_the_condition_that_grounds_their_input() {
+    let mut state = state(
+        "X > 0 => positive(X) -> yes. value(4). \
+         positive(X,Y) /\\ value(X) => result(Y).",
+    );
+    state.step().unwrap();
+    assert!(contains(&state, "result(yes)"));
+}
+
+#[test]
+fn pattern_function_clauses_schedule_their_positive_conditions() {
+    let mut state = state(
+        "value(4). Y is X + 1 /\\ value(X) => computed(Key) -> Y. \
+         result(computed(key)).",
+    );
+    state.step().unwrap();
+    assert!(contains(&state, "result(5)"));
+}
+
+#[test]
+fn ungrounded_arithmetic_inputs_are_rejected() {
+    for source in ["Y is X + 1 => leaked.", "X > 0 => leaked."] {
+        assert!(state(source).step_all().is_err(), "executed {source:?}");
+    }
+}
+
+#[test]
 fn previous_negation_inside_pattern_function_is_false_in_world_zero() {
     let mut state = state(
         "@~blocked(X) => choose(X) -> selected. \
@@ -543,6 +577,12 @@ fn public_pattern_function_queries_require_grounded_inputs() {
     let state = state("identity(X) -> X.");
     assert!(state.query(&atom("identity(X,Y)")).is_err());
     assert!(state.query(&atom("identity(a,Y)")).is_ok());
+}
+
+#[test]
+fn public_queries_validate_the_executable_profile() {
+    let state = state("wild(X) -> Y.");
+    assert!(state.query(&atom("wild(a,Y)")).is_err());
 }
 
 #[test]

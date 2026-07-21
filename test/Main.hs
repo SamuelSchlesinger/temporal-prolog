@@ -800,6 +800,39 @@ safetyValidationSpec = describe "Safety validation" $ do
           ]) [] 1
     worldContains st "result(a)" `shouldBe` True
 
+  it "schedules arithmetic after the condition that grounds its input" $ do
+    let st = runWithAssertions (unlines
+          [ "value(4)."
+          , "Y is X + 1 /\\ value(X) => result(Y)."
+          ]) [] 1
+    worldContains st "result(5)" `shouldBe` True
+
+  it "schedules pattern calls after the condition that grounds their input" $ do
+    let st = runWithAssertions (unlines
+          [ "X > 0 => positive(X) -> yes."
+          , "value(4)."
+          , "positive(X, Y) /\\ value(X) => result(Y)."
+          ]) [] 1
+    worldContains st "result(yes)" `shouldBe` True
+
+  it "schedules conditions inside pattern-function clauses" $ do
+    let st = runWithAssertions (unlines
+          [ "value(4)."
+          , "Y is X + 1 /\\ value(X) => computed(Key) -> Y."
+          , "result(computed(key))."
+          ]) [] 1
+    worldContains st "result(5)" `shouldBe` True
+
+  it "rejects conditions with ungrounded arithmetic inputs" $ do
+    let programs =
+          [ "Y is X + 1 => leaked."
+          , "X > 0 => leaked."
+          ]
+    mapM_ (\source ->
+      let np = parseAndNormalize source
+      in stepWorld (newInterpreterState np Set.empty) `shouldSatisfy` isLeft)
+      programs
+
 -- ============================================================
 -- K-M. Edge cases
 -- ============================================================
@@ -867,6 +900,12 @@ runtimeBoundarySpec = describe "Runtime query and input validation" $ do
       `shouldSatisfy` isLeft
     queryAtomEither (Atom "identity" [TFun "a" [], TVar "Y"]) state
       `shouldSatisfy` isRight
+
+  it "validates the executable profile before public queries" $ do
+    let (program, pfNames) = parseAndNormalizeWithPF "wild(X) -> Y."
+        state = newInterpreterState program pfNames
+    queryAtomEither (Atom "wild" [TFun "a" [], TVar "Y"]) state
+      `shouldSatisfy` isLeft
 
   it "rejects malformed runtime queries instead of treating them as false" $ do
     let (program, pfNames) = parseAndNormalizeWithPF
@@ -1486,6 +1525,13 @@ sharedConformanceSpec = describe "Shared Haskell/Rust conformance corpus" $ do
           [(0, ["div(a,b)", "mod(c,d)"])] 1
     worldContains predicateState "namespace_ok" `shouldBe` True
 
+  it "schedules shared positive conditions by their grounding dependencies" $ do
+    source <- readFile "conformance/cases/condition_scheduling.tpl"
+    let st = runWithAssertions source [] 1
+    worldContains st "arithmetic_result(5)" `shouldBe` True
+    worldContains st "pattern_result(yes)" `shouldBe` True
+    worldContains st "computed_result(5)" `shouldBe` True
+
   it "rejects the shared negative corpus at the specified boundaries" $ do
     forZero <- readFile "conformance/rejections/for_zero.tpl"
     plainPrevious <- readFile "conformance/rejections/plain_previous_term.tpl"
@@ -1511,6 +1557,7 @@ sharedConformanceSpec = describe "Shared Haskell/Rust conformance corpus" $ do
       [ "unsafe_range.tpl"
       , "unsafe_pattern_input.tpl"
       , "unsafe_pattern_output.tpl"
+      , "unsafe_arithmetic_input.tpl"
       ] $ \filename -> do
         source <- readFile ("conformance/rejections/" ++ filename)
         case compileSource source of

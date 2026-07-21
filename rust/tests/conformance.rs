@@ -211,6 +211,26 @@ fn contextual_names_follow_their_namespace() {
 }
 
 #[test]
+fn positive_conditions_follow_grounding_dependencies() {
+    let mut state = Interpreter::new(
+        compile(include_str!(
+            "../../conformance/cases/condition_scheduling.tpl"
+        ))
+        .unwrap(),
+    );
+    state.step().unwrap();
+    assert!(state
+        .world()
+        .unwrap()
+        .contains(&atom("arithmetic_result(5)")));
+    assert!(state
+        .world()
+        .unwrap()
+        .contains(&atom("pattern_result(yes)")));
+    assert!(state.world().unwrap().contains(&atom("computed_result(5)")));
+}
+
+#[test]
 fn shared_rejection_cases() {
     assert!(compile(include_str!("../../conformance/rejections/for_zero.tpl")).is_err());
     assert!(compile(include_str!(
@@ -279,6 +299,10 @@ fn shared_rejection_cases() {
         (
             "ungrounded pattern-function output",
             include_str!("../../conformance/rejections/unsafe_pattern_output.tpl"),
+        ),
+        (
+            "ungrounded arithmetic input",
+            include_str!("../../conformance/rejections/unsafe_arithmetic_input.tpl"),
         ),
     ] {
         let unsafe_program = compile(source).unwrap();

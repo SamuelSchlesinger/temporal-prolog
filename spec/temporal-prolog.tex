@@ -501,13 +501,15 @@ The Haskell and Rust implementations execute the following common profile.
   \item Query atoms obey the same signature rules and MUST NOT address
   normalization-generated predicates.  Internal pattern-function relations
   MAY be queried only at relational arity with $k$ ground inputs; the final
-  output MAY contain variables.
+  output MAY contain variables.  Implementations MUST validate this profile
+  before any query.
   \item Every variable in a negated condition, forward-chained head, or
-  pattern-function input position is grounded by positive body conditions,
-  $\at(X)$, unification with a ground term, or ground arithmetic before it is
-  observed.  A pattern-function call binds only its final output after its
-  inputs are ground.  Its clauses begin with head inputs ground and MUST
-  ground the head output from those inputs and positive body conditions.
+  mode input is grounded by positive body conditions before observation.  Mode
+  inputs are the first $k$ pattern positions, the \verb|is| expression, and
+  comparison operands.  A pattern call binds only its output; clauses assume
+  head inputs ground and MUST ground it.  Evaluators MUST defer mode-blocked
+  positive conjuncts: source order MUST NOT cause failure, and a body with no
+  safe order MUST be rejected.
   \item A parsed \verb|for| count is retained as an arbitrary-precision
   positive integer.  The portable executable profile admits counts through
   1,000 inclusive.  A larger count MUST be rejected as a normalization
@@ -519,15 +521,12 @@ The Haskell and Rust implementations execute the following common profile.
   \item Candidate generation for a world reaches a finite fixed point within
   the configured fuel limit.  A program that generates an unbounded Herbrand
   base is rejected for that run.
-  \item The general evaluator's candidate base is closed under relaxed
-  positive derivation and under every grounded current-world negative atom
-  whose predicate is internal and whose remaining body is satisfied in that
-  relaxed closure.  These steps repeat to a fixed point.  This second clause
-  is necessary because the paper uses classical minimal models: an
-  unsupported atom may occur solely to block a negative antecedent.
-  \item General negative SCCs are executed only when the finite candidate
-  base is no larger than the configured enumeration limit.  Exceeding the
-  limit is a resource error, not a semantic result.
+  \item The general candidate base is the fixed-point closure of relaxed
+  positive derivation plus every grounded current-world negative internal atom
+  whose remaining body holds in that closure.  This preserves unsupported
+  blockers admitted by the paper's classical models.
+  \item General negative SCCs require a candidate base within the configured
+  enumeration limit; excess is a resource error, not a semantic result.
   \item Internal pattern-function relations are solved by alpha-renamed
   backward chaining.  Reaching its recursion limit is reported as a resource
   error in conformance mode; it MUST NOT be reported as logical failure.
@@ -636,15 +635,11 @@ range-restriction rules. \\
 A release is conformant only when all of the following are true.
 
 \begin{enumerate}
-  \item Both implementations parse every shared positive corpus case and
-  reject every shared negative case.  Rejections cover arity conflicts,
-  non-ASCII identifiers, malformed pattern-function or external signatures,
-  oversized \verb|for| counts, and external results or assertions.  Positive
-  cases cover contextual keyword namespaces.  Runtime cases reject signature
-  changes across source, input, and history; internal-name injection;
-  term-level previous; malformed arithmetic; unsafe pattern-function modes;
-  and query-mode violations.  Public queries also test every external
-  predicate family's bindings.
+  \item Both implementations accept every shared positive and reject every
+  negative case, covering lexical and signature violations, temporal and
+  arithmetic boundaries, unsafe modes, and query validation.  A positive case
+  puts mode calls before grounding conjuncts; public queries cover external
+  bindings and whole-program profile validation.
   \item Normalization invariants hold: no surface temporal operator or
   term-level previous wrapper remains, every body condition is normal, and
   fresh identifiers do not collide with source identifiers.  Generated-name

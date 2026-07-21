@@ -12,8 +12,9 @@ and the complete set of minimal branches are compared instead.
 Rust batch runners with the same scheduled inputs, then compares their complete
 canonical histories and full-state semantic digests byte for byte. It covers
 future and past operators, branching negative cycles, unsupported classical
-blockers, pattern functions, term-level previous, arithmetic, and every shared
-rejection case. Future-result coverage distinguishes the normative precedence
+blockers, pattern functions, term-level previous, arithmetic, binding-safe
+positive-condition scheduling, and every shared rejection case. Future-result
+coverage distinguishes the normative precedence
 of conjunction over `until` and `atnext`. Arithmetic coverage includes
 arbitrary-precision values,
 canonical integer spellings, operator precedence, signed floor division, and
@@ -26,8 +27,9 @@ exactly 1,000 and 1,001 Step-1 rewrite rounds, proving that the shared resource
 boundary is inclusive and that the following round is rejected. Negative cases
 additionally cover mixed predicate, constructor, and pattern-function arities;
 malformed pattern-function relational calls; malformed built-in and arithmetic
-signatures; ungrounded pattern-function inputs and outputs; and attempts to
-define an external built-in as a stored result.
+signatures; ungrounded pattern-function inputs or outputs; ungrounded
+arithmetic inputs; and attempts to define an external built-in as a stored
+result.
 The negative corpus also rejects unparenthesized chains of non-associative
 past-time condition operators, non-ASCII identifiers, and `for` counts beyond
 the portable executable expansion limit. Positive lexical

@@ -15,7 +15,11 @@ relations, and evaluates built-ins through the public query API. A normalized
 pattern-function relation requires its input positions to be ground before a
 call; success binds its final output position. Definitions must ground that
 output from their matched inputs and positive conditions, and public queries
-enforce the same input mode.
+enforce the same input mode and validate the entire executable profile before
+evaluation. Positive rule conditions are scheduled by grounding dependency,
+so a temporarily nonground arithmetic expression or pattern call waits for a
+later-written relation that supplies its input; a body with no safe schedule
+is rejected.
 Source `for` counts are likewise retained exactly. Compilation admits the
 portable limit of 1,000 repetitions and rejects larger counts before expansion,
 so behavior cannot depend on the host's pointer width.

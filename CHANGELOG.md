@@ -16,6 +16,8 @@
   the executable profile's term-level previous and range restrictions.
 * Enforce the normalized pattern-function input/output mode: calls and public
   queries require ground inputs, and clauses must ground their result.
+* Schedule positive conjunctions by grounding dependency in forward and
+  backward evaluation; reject bodies with permanently unground arithmetic.
 * Add an independent Rust parser, normalizer, backward chainer, and world
   evaluator, plus a shared cross-language conformance corpus.
 * Add matched, digest-checked Haskell/Rust benchmark harnesses and a normative

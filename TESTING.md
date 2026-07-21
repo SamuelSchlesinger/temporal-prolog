@@ -28,7 +28,9 @@ sh conformance/run.sh
 Its rejection corpus includes an oversized arbitrary-precision `for` count,
 guarding against machine-word overflow and pointer-width-dependent parsing,
 plus mode-unsafe pattern-function calls and clauses whose output cannot be
-grounded from their inputs or positive conditions.
+grounded from their inputs or positive conditions. A positive differential
+case writes arithmetic and pattern calls before their grounding relation to
+ensure both engines schedule conjunctions by dependency rather than text.
 Both unit suites also exercise the inclusive 1,000-repetition executable
 boundary and exact parse/print round trips above machine range.
 

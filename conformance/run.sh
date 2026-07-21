@@ -80,6 +80,7 @@ check_case arithmetic conformance/cases/arithmetic.tpl \
 check_case arithmetic-edges conformance/cases/arithmetic_edges.tpl
 check_case conditional-reduction conformance/cases/conditional_reduction.tpl \
   --assert '0:enabled(a)' --assert '0:request(a)'
+check_case condition-scheduling conformance/cases/condition_scheduling.tpl
 check_case auxiliary-collision conformance/cases/auxiliary_collision.tpl --steps 2 \
   --assert 0:trigger
 check_case auxiliary-collision-internal conformance/cases/auxiliary_collision.tpl --steps 2 \
@@ -95,6 +96,7 @@ reject_case plain-previous-term conformance/rejections/plain_previous_term.tpl
 reject_case unsafe-range conformance/rejections/unsafe_range.tpl
 reject_case unsafe-pattern-input conformance/rejections/unsafe_pattern_input.tpl
 reject_case unsafe-pattern-output conformance/rejections/unsafe_pattern_output.tpl
+reject_case unsafe-arithmetic-input conformance/rejections/unsafe_arithmetic_input.tpl
 reject_case mixed-predicate-arity conformance/rejections/mixed_predicate_arity.tpl
 reject_case mixed-constructor-arity conformance/rejections/mixed_constructor_arity.tpl
 reject_case mixed-pattern-arity conformance/rejections/mixed_pattern_arity.tpl

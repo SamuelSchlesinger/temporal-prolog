@@ -129,6 +129,7 @@ queryAtom pat st = either (const []) id (queryAtomEither pat st)
 queryAtomEither :: Atom -> InterpreterState -> Either String [Subst]
 queryAtomEither pat st = do
   validateQueryAtom st pat
+  validateExecutableProfile (isProgram st) (isPFNames st)
   let pfNames = isPFNames st
       prog = isProgram st
       (pfRules, _) = partition (\r -> predName (nrHead r) `Set.member` pfNames) prog
@@ -527,18 +528,18 @@ deriveFromRule pfNames pfRules (NormalRule conds headAtom) worlds worldNum world
       -- Only keep ground results
   Right (filter isGroundAtom heads)
 
--- | Find all substitutions satisfying a list of conditions.
---   Reorders so positive conditions are processed before negative ones
---   (standard safety condition for negation-as-failure).
+-- | Find all substitutions satisfying a list of conditions. Positive
+-- conditions are selected in a binding-safe order before negation
+-- (the standard safety condition for negation-as-failure).
 findSatisfyingSubsts :: Set Name -> [NormalRule] -> [NormalCond] -> IntMap World -> Int -> World
                      -> Either String [Subst]
 findSatisfyingSubsts pfNames pfRules conds worlds worldNum world =
-  let (pos, neg) = partition (\c -> not (ncNegated c)) conds
-      ordered = pos ++ neg
-  in go ordered worlds worldNum world
+  go conds worlds worldNum world
   where
+    patternArities = patternFunctionInputArities pfRules pfNames
     go [] _ _ _ = Right [emptySubst]
-    go (c:cs) ws wn w = do
+    go remaining ws wn w = do
+      (c, cs) <- selectRunnableCondition patternArities remaining
       first <- satisfyCond pfNames pfRules c ws wn w
       branches <- mapM (continue cs ws wn w) first
       Right (concat branches)
@@ -717,18 +718,24 @@ tryBCRule pfNames pfRules goal world worlds worldNum depth idx rule =
       solved <- solveBCConds pfNames pfRules conds' world worlds worldNum depth
       Right (map (\s2 -> composeSubst s2 s) solved)
 
--- | Solve a list of conditions sequentially, threading substitutions.
+-- | Solve a list of conditions in a binding-safe order, threading
+-- substitutions. Positive conjunction is logical rather than textual:
+-- operations with ground-input modes wait until another positive condition
+-- has supplied their inputs.
 solveBCConds :: Set Name -> [NormalRule] -> [NormalCond] -> World -> IntMap World -> Int -> Int
              -> Either String [Subst]
-solveBCConds _pfNames _pfRules [] _world _worlds _worldNum _depth = Right [emptySubst]
-solveBCConds pfNames pfRules (c:cs) world worlds worldNum depth = do
-  first <- solveBCCond pfNames pfRules c world worlds worldNum depth
-  branches <- mapM continue first
-  Right (concat branches)
+solveBCConds pfNames pfRules = go
   where
-    continue s1 = do
+    patternArities = patternFunctionInputArities pfRules pfNames
+    go [] _world _worlds _worldNum _depth = Right [emptySubst]
+    go remaining world worlds worldNum depth = do
+      (c, cs) <- selectRunnableCondition patternArities remaining
+      first <- solveBCCond pfNames pfRules c world worlds worldNum depth
+      branches <- mapM (continue cs world worlds worldNum depth) first
+      Right (concat branches)
+    continue cs world worlds worldNum depth s1 = do
       let cs' = map (applySubstNormalCond s1) cs
-      rest <- solveBCConds pfNames pfRules cs' world worlds worldNum depth
+      rest <- go cs' world worlds worldNum depth
       Right [composeSubst s2 s1 | s2 <- rest]
 
 -- | Solve a single condition in backward-chaining context.
@@ -793,14 +800,13 @@ validateExecutableProfile prog pfNames = mapM_ validateRule prog
                    , Set.unions (map fvTerm outputs)
                    )
           bound = bindingFixedPoint patternArities initiallyBound positives
-          patternInputs = Set.unions
-            [ Set.unions (map fvTerm (take inputArity terms))
-            | NormalCond _ False (Atom name terms) <- positives
-            , Just inputArity <- [Map.lookup name patternArities]
+          requiredInputs = Set.unions
+            [ requiredGroundVars patternArities (ncAtom condition)
+            | condition <- positives
             ]
           observed = Set.unions
             [ headObserved
-            , patternInputs
+            , requiredInputs
             , Set.unions [fvAtom (ncAtom c) | c <- conditions, ncNegated c]
             ]
           unsafe = observed `Set.difference` bound
@@ -818,6 +824,48 @@ patternFunctionInputArities prog pfNames = Map.fromList
   , name `Set.member` pfNames
   , not (null terms)
   ]
+
+-- | Select the next condition without imposing accidental source-order
+-- failure on logical conjunction. All positive conditions run before
+-- negation; among them, calls with ground-input modes wait for a runnable
+-- relation or unification to supply those inputs.
+selectRunnableCondition
+  :: Map Name Int -> [NormalCond] -> Either String (NormalCond, [NormalCond])
+selectRunnableCondition patternArities conditions =
+  let (positives, negatives) = partition (not . ncNegated) conditions
+  in case extractFirst (conditionRunnable patternArities) positives of
+       Just (condition, rest) -> Right (condition, rest ++ negatives)
+       Nothing -> case (positives, negatives) of
+         ([], condition:rest) -> Right (condition, rest)
+         ([], []) -> Left "Internal error: cannot select from empty conditions"
+         _ -> Left $ "Positive conditions have no binding-safe evaluation order: "
+                  ++ show positives
+
+extractFirst :: (a -> Bool) -> [a] -> Maybe (a, [a])
+extractFirst predicate = go []
+  where
+    go _ [] = Nothing
+    go before (value:rest)
+      | predicate value = Just (value, reverse before ++ rest)
+      | otherwise = go (value : before) rest
+
+conditionRunnable :: Map Name Int -> NormalCond -> Bool
+conditionRunnable patternArities condition = case ncAtom condition of
+  Atom name terms
+    | Just inputArity <- Map.lookup name patternArities ->
+        all isGroundTerm (take inputArity terms)
+  Atom "is" [_, expression] -> isGroundTerm expression
+  Atom op terms | op `elem` [">", "<", ">=", "<="] ->
+    all isGroundTerm terms
+  _ -> True
+
+requiredGroundVars :: Map Name Int -> Atom -> Set Var
+requiredGroundVars patternArities atom@(Atom name terms)
+  | Just inputArity <- Map.lookup name patternArities =
+      Set.unions (map fvTerm (take inputArity terms))
+  | name == "is", [_, expression] <- terms = fvTerm expression
+  | name `elem` [">", "<", ">=", "<="] = fvAtom atom
+  | otherwise = Set.empty
 
 bindingFixedPoint :: Map Name Int -> Set Var -> [NormalCond] -> Set Var
 bindingFixedPoint patternArities initiallyBound conds = go initiallyBound

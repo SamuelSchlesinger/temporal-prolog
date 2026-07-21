@@ -115,6 +115,7 @@ impl Interpreter {
         }
         validate_pattern_query(&self.program, atom)?;
         validate_runtime_signatures(&self.program, &self.worlds, &self.assertions, Some(atom))?;
+        validate_profile(&self.program)?;
         let (pf_rules, _) = partition_rules(&self.program);
         let current = self.world().cloned().unwrap_or_default();
         let n = self.worlds.len().saturating_sub(1);
@@ -457,15 +458,23 @@ fn find_substitutions(
     n: usize,
     current: &World,
 ) -> Result<Vec<Subst>, String> {
-    let mut ordered = conditions.to_vec();
-    ordered.sort_by_key(|condition| condition.negated);
-    solve_conditions(pf_names, pf_rules, &ordered, history, n, current)
+    let pattern_arities = pattern_function_rule_arities(pf_rules, pf_names);
+    solve_conditions(
+        pf_names,
+        pf_rules,
+        conditions,
+        &pattern_arities,
+        history,
+        n,
+        current,
+    )
 }
 
 fn solve_conditions(
     pf_names: &BTreeSet<Name>,
     pf_rules: &[NormalRule],
     conditions: &[NormalCond],
+    pattern_arities: &BTreeMap<Name, usize>,
     history: &[World],
     n: usize,
     current: &World,
@@ -473,10 +482,11 @@ fn solve_conditions(
     if conditions.is_empty() {
         return Ok(vec![Subst::new()]);
     }
-    let first = satisfy_condition(pf_names, pf_rules, &conditions[0], history, n, current)?;
+    let (condition, remaining) = select_runnable_condition(pattern_arities, conditions)?;
+    let first = satisfy_condition(pf_names, pf_rules, &condition, history, n, current)?;
     let mut output = Vec::new();
     for subst in first {
-        let rest: Vec<_> = conditions[1..]
+        let rest: Vec<_> = remaining
             .iter()
             .map(|condition| NormalCond {
                 depth: condition.depth,
@@ -484,7 +494,15 @@ fn solve_conditions(
                 atom: condition.atom.apply(&subst),
             })
             .collect();
-        for tail in solve_conditions(pf_names, pf_rules, &rest, history, n, current)? {
+        for tail in solve_conditions(
+            pf_names,
+            pf_rules,
+            &rest,
+            pattern_arities,
+            history,
+            n,
+            current,
+        )? {
             output.push(compose(&tail, &subst));
         }
     }
@@ -692,10 +710,34 @@ fn solve_bc_conditions(
     n: usize,
     depth: usize,
 ) -> Result<Vec<Subst>, String> {
+    let pattern_arities = pattern_function_rule_arities(rules, pf_names);
+    solve_bc_conditions_with_arities(
+        pf_names,
+        rules,
+        conditions,
+        &pattern_arities,
+        current,
+        history,
+        n,
+        depth,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn solve_bc_conditions_with_arities(
+    pf_names: &BTreeSet<Name>,
+    rules: &[NormalRule],
+    conditions: &[NormalCond],
+    pattern_arities: &BTreeMap<Name, usize>,
+    current: &World,
+    history: &[World],
+    n: usize,
+    depth: usize,
+) -> Result<Vec<Subst>, String> {
     if conditions.is_empty() {
         return Ok(vec![Subst::new()]);
     }
-    let condition = &conditions[0];
+    let (condition, remaining) = select_runnable_condition(pattern_arities, conditions)?;
     let Some((target, target_n)) = lookup_world(condition.depth, history, n, current) else {
         return Ok(vec![]);
     };
@@ -719,7 +761,7 @@ fn solve_bc_conditions(
     };
     let mut output = Vec::new();
     for subst in first {
-        let rest: Vec<_> = conditions[1..]
+        let rest: Vec<_> = remaining
             .iter()
             .map(|c| NormalCond {
                 depth: c.depth,
@@ -727,7 +769,16 @@ fn solve_bc_conditions(
                 atom: c.atom.apply(&subst),
             })
             .collect();
-        for tail in solve_bc_conditions(pf_names, rules, &rest, current, history, n, depth)? {
+        for tail in solve_bc_conditions_with_arities(
+            pf_names,
+            rules,
+            &rest,
+            pattern_arities,
+            current,
+            history,
+            n,
+            depth,
+        )? {
             output.push(compose(&tail, &subst));
         }
     }
@@ -974,16 +1025,7 @@ fn validate_profile(program: &NormalizedProgram) -> Result<(), String> {
         }
         let mut observed = head_observed;
         for condition in &positives {
-            if let Some(input_arity) = pattern_arities.get(&condition.atom.name).copied() {
-                observed.extend(
-                    condition
-                        .atom
-                        .terms
-                        .iter()
-                        .take(input_arity)
-                        .flat_map(Term::vars),
-                );
-            }
+            observed.extend(required_ground_vars(&condition.atom, &pattern_arities));
         }
         observed.extend(
             rule.conditions
@@ -1002,10 +1044,16 @@ fn validate_profile(program: &NormalizedProgram) -> Result<(), String> {
 }
 
 fn pattern_function_input_arities(program: &NormalizedProgram) -> BTreeMap<Name, usize> {
-    program
-        .rules
+    pattern_function_rule_arities(&program.rules, &program.pattern_functions)
+}
+
+fn pattern_function_rule_arities(
+    rules: &[NormalRule],
+    pattern_functions: &BTreeSet<Name>,
+) -> BTreeMap<Name, usize> {
+    rules
         .iter()
-        .filter(|rule| program.pattern_functions.contains(&rule.head.name))
+        .filter(|rule| pattern_functions.contains(&rule.head.name))
         .filter_map(|rule| {
             rule.head
                 .terms
@@ -1014,6 +1062,64 @@ fn pattern_function_input_arities(program: &NormalizedProgram) -> BTreeMap<Name,
                 .map(|arity| (rule.head.name.clone(), arity))
         })
         .collect()
+}
+
+fn select_runnable_condition(
+    pattern_arities: &BTreeMap<Name, usize>,
+    conditions: &[NormalCond],
+) -> Result<(NormalCond, Vec<NormalCond>), String> {
+    let mut positives: Vec<_> = conditions
+        .iter()
+        .filter(|condition| !condition.negated)
+        .cloned()
+        .collect();
+    let mut negatives: Vec<_> = conditions
+        .iter()
+        .filter(|condition| condition.negated)
+        .cloned()
+        .collect();
+    if let Some(index) = positives
+        .iter()
+        .position(|condition| condition_runnable(&condition.atom, pattern_arities))
+    {
+        let condition = positives.remove(index);
+        positives.extend(negatives);
+        return Ok((condition, positives));
+    }
+    if positives.is_empty() && !negatives.is_empty() {
+        let condition = negatives.remove(0);
+        return Ok((condition, negatives));
+    }
+    Err(format!(
+        "positive conditions have no binding-safe evaluation order: {positives:?}"
+    ))
+}
+
+fn condition_runnable(atom: &Atom, pattern_arities: &BTreeMap<Name, usize>) -> bool {
+    if let Some(input_arity) = pattern_arities.get(&atom.name).copied() {
+        return atom.terms.iter().take(input_arity).all(Term::ground);
+    }
+    match (atom.name.as_str(), atom.terms.as_slice()) {
+        ("is", [_, expression]) => expression.ground(),
+        (">" | "<" | ">=" | "<=", terms) => terms.iter().all(Term::ground),
+        _ => true,
+    }
+}
+
+fn required_ground_vars(atom: &Atom, pattern_arities: &BTreeMap<Name, usize>) -> BTreeSet<Var> {
+    if let Some(input_arity) = pattern_arities.get(&atom.name).copied() {
+        return atom
+            .terms
+            .iter()
+            .take(input_arity)
+            .flat_map(Term::vars)
+            .collect();
+    }
+    match (atom.name.as_str(), atom.terms.as_slice()) {
+        ("is", [_, expression]) => expression.vars(),
+        (">" | "<" | ">=" | "<=", _) => atom.vars(),
+        _ => BTreeSet::new(),
+    }
 }
 
 fn validate_pattern_query(program: &NormalizedProgram, atom: &Atom) -> Result<(), String> {

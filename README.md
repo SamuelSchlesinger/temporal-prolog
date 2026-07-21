@@ -285,10 +285,14 @@ Arithmetic terms support infix `+`, `-`, `*`, `div`, and `mod`; `div` and
 `mod` have the same precedence as multiplication and associate to the left.
 Division rounds toward negative infinity, with the remainder taking the sign
 of the divisor. Division by zero and nonground or noninteger arithmetic fail
-without binding. The repetition count in `for` is parsed as an exact positive
-integer rather than a machine word. The portable executable profile admits at
-most 1,000 repetitions; larger counts are rejected as normalization resource
-errors before expansion, never truncated or wrapped.
+without binding. In rule bodies, positive conjuncts are scheduled by their
+grounding dependencies, so `Y is X + 1 /\ value(X)` waits for `value(X)` even
+though it is written second. A rule whose arithmetic or pattern-function
+inputs cannot be grounded is rejected by the executable profile. The
+repetition count in `for` is parsed as an exact positive integer rather than a
+machine word. The portable executable profile admits at most 1,000
+repetitions; larger counts are rejected as normalization resource errors
+before expansion, never truncated or wrapped.
 
 Both libraries can parse and pretty-print source ASTs without changing their
 structure. The Rust API exposes `parse_term`, `parse_condition`, `parse_result`,
@@ -317,7 +321,9 @@ Queries use the same external evaluator as rule conditions, so equality,
 arithmetic, comparisons, `at(N)`, `true`, and `false` return answers and
 bindings directly. For example, `:query X is 2 + 3` returns `X = 5`.
 Malformed signatures are reported as errors instead of being treated as
-logical failure.
+logical failure. Queries also validate the loaded program's executable profile
+before evaluation, so an unsafe pattern-function definition cannot bypass the
+step-time checks.
 
 You can also type a rule directly at the prompt to add it to the program:
 
@@ -472,6 +478,9 @@ The implementation follows a five-phase pipeline:
    `false`) are evaluated specially in both rule conditions and public
    queries. Runtime atoms are signature-checked before assertion or query;
    generated predicates and pattern-function relations cannot be asserted.
+   Positive conditions are selected in a binding-safe order in both the
+   forward and backward engines; temporarily nonground arithmetic and
+   pattern-function calls are deferred until another conjunct grounds them.
    Pattern-function queries additionally require every input position to be
    ground, while leaving the final result position available for binding.
 
@@ -500,7 +509,9 @@ that distinction.
 
 The executable profile requires finite candidate generation and range-restricted
 forward rules. Resource limits and unsafe rules are reported as errors rather
-than being treated as logical failure. Normalization Steps 1, 2, and 4 admit
+than being treated as logical failure. This includes any required arithmetic
+or pattern-function input that no positive conjunct can ground. Normalization
+Steps 1, 2, and 4 admit
 1,000 productive rewrite rounds each, inclusively: reaching normal form on the
 final round succeeds, while a remaining target is a resource error. The
 independent Rust crate in `rust/` implements the same parser, normalization,
