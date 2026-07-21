@@ -519,13 +519,13 @@ evaluateExternal (Atom "=" [t1, t2]) _ =
     Just s  -> Just [s]
     Nothing -> Just []
 evaluateExternal (Atom "is" [result, expr]) _ =
-  case evalArith expr of
+  Just $ case evalArith expr of
     Just n  ->
       let nTerm = TFun (show n) []
       in case unifyTerm result nTerm of
-           Just s  -> Just [s]
-           Nothing -> Just []
-    Nothing -> Nothing
+           Just s  -> [s]
+           Nothing -> []
+    Nothing -> []
 evaluateExternal (Atom ">" [t1, t2]) _ = boolExternal $ compareArith t1 t2 (>)
 evaluateExternal (Atom "<" [t1, t2]) _ = boolExternal $ compareArith t1 t2 (<)
 evaluateExternal (Atom ">=" [t1, t2]) _ = boolExternal $ compareArith t1 t2 (>=)
@@ -539,11 +539,13 @@ evaluateExternal _ _ = Nothing
 boolExternal :: Maybe Bool -> Maybe [Subst]
 boolExternal (Just True) = Just [emptySubst]
 boolExternal (Just False) = Just []
-boolExternal Nothing = Nothing
+boolExternal Nothing = Just []
 
 -- | Evaluate an arithmetic expression to an integer.
---   Supports +, -, *, div, mod, and integer literals.
-evalArith :: Term -> Maybe Int
+--   Integers are arbitrary precision.  @div@ rounds toward negative infinity
+--   and @mod@ has the sign of the divisor, matching their mathematical
+--   floor-division identity.
+evalArith :: Term -> Maybe Integer
 evalArith (TFun s []) = case reads s of
   [(n, "")] -> Just n
   _         -> Nothing
@@ -562,7 +564,7 @@ evalArith _ = Nothing
 
 -- | Compare two terms arithmetically.
 --   Both sides are evaluated as arithmetic expressions before comparison.
-compareArith :: Term -> Term -> (Int -> Int -> Bool) -> Maybe Bool
+compareArith :: Term -> Term -> (Integer -> Integer -> Bool) -> Maybe Bool
 compareArith t1 t2 op = do
   n1 <- evalArith t1
   n2 <- evalArith t2

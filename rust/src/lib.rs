@@ -1,5 +1,5 @@
-//! A dependency-free Rust implementation of the Temporal Prolog language
-//! specified in `../spec/temporal-prolog.tex`.
+//! A Rust implementation of the Temporal Prolog language specified in
+//! `../spec/temporal-prolog.tex`.
 
 pub mod ast;
 pub mod batch;

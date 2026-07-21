@@ -227,8 +227,13 @@ hot(X) => off(X).  % inline comment
 
 **Variables** start with an uppercase letter (`X`, `Room`). **Atoms** and
 **predicates** start with a lowercase letter or underscore (`hot`, `_aux`).
-**Numbers** are integers (`-3`, `0`, `42`). The repetition count in `for`
-must be positive.
+**Numbers** are arbitrary-precision integers (`-3`, `0`, `42`). Leading zeros
+do not create distinct terms: `007` is the integer `7`, and `-0` is `0`.
+Arithmetic terms support infix `+`, `-`, `*`, `div`, and `mod`; `div` and
+`mod` have the same precedence as multiplication and associate to the left.
+Division rounds toward negative infinity, with the remainder taking the sign
+of the divisor. Division by zero and nonground or noninteger arithmetic fail
+without binding. The repetition count in `for` must be positive.
 
 ## REPL commands
 

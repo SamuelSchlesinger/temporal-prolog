@@ -5,6 +5,8 @@ Prolog language in the
 [temporal-prolog repository](https://github.com/SamuelSchlesinger/temporal-prolog).
 It provides parsing, normalization, branch-preserving execution, pattern
 functions, deterministic batch execution, and bounded protocol model checking.
+Its integer extension uses arbitrary-precision values and the same signed
+floor-division semantics as the Haskell implementation.
 
 ```rust
 use temporal_prolog::{compile, Interpreter};

@@ -110,6 +110,18 @@ parserSpec = describe "Parser" $ do
   it "parses numbers" $ do
     parseTerm "<test>" "42" `shouldBe` Right (TFun "42" [])
 
+  it "canonicalizes arbitrary-precision integer spellings" $ do
+    parseTerm "<test>" "0009223372036854775808"
+      `shouldBe` Right (TFun "9223372036854775808" [])
+    parseTerm "<test>" "-0" `shouldBe` Right (TFun "0" [])
+
+  it "parses infix div and mod at multiplicative precedence" $ do
+    parseTerm "<test>" "7 div 3 mod 2" `shouldBe` Right
+      (TFun "mod"
+        [ TFun "div" [TFun "7" [], TFun "3" []]
+        , TFun "2" []
+        ])
+
   it "parses functors" $ do
     parseTerm "<test>" "f(X, Y)" `shouldBe` Right (TFun "f" [TVar "X", TVar "Y"])
 
@@ -937,6 +949,34 @@ correctnessAndFeatureSpec = describe "Temporal operator semantics, parser extens
     let st = runWithAssertions prog [] 1
     worldContains st "result(3)" `shouldBe` True
 
+  it "uses arbitrary-precision floor division and modulo" $ do
+    let prog = unlines
+          [ "Q1 is -7 div 3 => q1(Q1)."
+          , "R1 is -7 mod 3 => r1(R1)."
+          , "Q2 is 7 div -3 => q2(Q2)."
+          , "R2 is 7 mod -3 => r2(R2)."
+          , "Huge is 9223372036854775808 * 9223372036854775808 => huge(Huge)."
+          ]
+        st = runWithAssertions prog [] 1
+    worldContains st "q1(-3)" `shouldBe` True
+    worldContains st "r1(2)" `shouldBe` True
+    worldContains st "q2(-3)" `shouldBe` True
+    worldContains st "r2(-2)" `shouldBe` True
+    worldContains st "huge(85070591730234615865843651857942052864)"
+      `shouldBe` True
+
+  it "treats invalid arithmetic as built-in failure" $ do
+    let prog = unlines
+          [ "Bad is 1 div 0 => division_by_zero_succeeded(Bad)."
+          , "Bad is not_an_integer + 1 => non_integer_succeeded(Bad)."
+          ]
+        st = runWithAssertions prog [] 1
+    let hasPredicate name = maybe False
+          (worldMatches (Atom name [TVar "X"]))
+          (currentWorld st)
+    hasPredicate "division_by_zero_succeeded" `shouldBe` False
+    hasPredicate "non_integer_succeeded" `shouldBe` False
+
   it "comparisons evaluate arithmetic: X + 1 > 5" $ do
     let prog = "val(X) /\\ X + 1 > 5 => big(X).\n"
     let st = runWithAssertions prog [(0, ["val(5)", "val(3)"])] 1
@@ -1015,6 +1055,12 @@ correctnessAndFeatureSpec = describe "Temporal operator semantics, parser extens
     ppTerm (TFun "*" [TFun "+" [TVar "X", TFun "1" []], TFun "3" []])
       `shouldBe` "(X + 1) * 3"
 
+  it "ppTerm prints div and mod as infix arithmetic" $ do
+    ppTerm (TFun "mod"
+      [ TFun "div" [TFun "7" [], TFun "3" []]
+      , TFun "2" []
+      ]) `shouldBe` "(7 div 3) mod 2"
+
   it "ppAtom prints is as infix" $ do
     ppAtom (Atom "is" [TVar "Y", TFun "+" [TVar "X", TFun "1" []]])
       `shouldBe` "Y is X + 1"
@@ -1066,6 +1112,23 @@ sharedConformanceSpec = describe "Shared Haskell/Rust conformance corpus" $ do
     src <- readFile "conformance/cases/append.tpl"
     let st = runWithAssertions src [] 1
     worldContains st "joined([1,2,3,4])" `shouldBe` True
+
+  it "portable arbitrary-precision arithmetic" $ do
+    src <- readFile "conformance/cases/arithmetic_edges.tpl"
+    let st = runWithAssertions src [] 1
+    worldContains st "canonical_integer_spellings(7,0)" `shouldBe` True
+    worldContains st "quotient_negative(-3)" `shouldBe` True
+    worldContains st "remainder_negative(2)" `shouldBe` True
+    worldContains st "quotient_negative_divisor(-3)" `shouldBe` True
+    worldContains st "remainder_negative_divisor(-2)" `shouldBe` True
+    worldContains st "precedence(4)" `shouldBe` True
+    worldContains st
+      "arbitrary_precision(85070591730234615865843651857942052864)"
+      `shouldBe` True
+    maybe False
+      (worldMatches (Atom "division_by_zero_succeeded" [TVar "X"]))
+      (currentWorld st)
+      `shouldBe` False
 
   it "rejects the shared negative corpus at the specified boundaries" $ do
     forZero <- readFile "conformance/rejections/for_zero.tpl"

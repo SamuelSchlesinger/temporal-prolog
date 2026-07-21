@@ -13,9 +13,11 @@ Rust batch runners with the same scheduled inputs, then compares their complete
 canonical histories and full-state semantic digests byte for byte. It covers
 future and past operators, branching negative cycles, unsupported classical
 blockers, pattern functions, term-level previous, arithmetic, and every shared
-rejection case. Adversarial fresh-name cases also verify that source predicates
-ending in `_auxN` remain observable while actual generated predicates are
-hidden unless requested.
+rejection case. Arithmetic coverage includes arbitrary-precision values,
+canonical integer spellings, operator precedence, signed floor division, and
+division-by-zero failure. Adversarial fresh-name cases also verify that source
+predicates ending in `_auxN` remain observable while actual generated
+predicates are hidden unless requested.
 
 Run it from the repository root:
 

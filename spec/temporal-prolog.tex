@@ -78,8 +78,11 @@ RIMS K\={o}ky\={u}roku 586 (1986), pp.~305--329.
 A variable begins with an uppercase ASCII letter and continues with ASCII
 letters, digits, or underscores.  A name begins with a lowercase ASCII letter
 or underscore and has the same continuation characters.  Decimal integer
-literals may have a leading minus sign.  A comment begins with \verb|%| and
-extends to the end of the line.  Whitespace and comments separate tokens.
+literals may have a leading minus sign and denote arbitrary-precision
+mathematical integers.  Their spelling is canonicalized by numeric value, so
+\verb|007| denotes the same term as \verb|7| and \verb|-0| denotes
+\verb|0|.  A comment begins with \verb|%| and extends to the end of the line.
+Whitespace and comments separate tokens.
 
 The namespaces below are disjoint in the abstract language:
 \[
@@ -88,7 +91,8 @@ V,\quad SF,\quad PF_i,\quad PF_e,\quad P_i,\quad P_e.
 They denote variables, constructor (Skolem) functions, internal and external
 pattern functions, and internal and external predicates.  Each non-variable
 symbol has a fixed arity.  Constants are arity-zero constructor functions.
-The external predicates include $=$, $\true$, $\false$, and $\at/1$.
+The external predicates include $=$, \verb|is|/2, the four integer
+comparisons, $\true$, $\false$, and $\at/1$.
 
 The concrete implementation infers internal pattern-function names from
 reduction heads.  Other callable names are predicates; constructor names are
@@ -133,7 +137,7 @@ call         ::= name "(" [term ("," term)*] ")"
 term         ::= variable | integer | name | call
                | "[" [term ("," term)* ["|" term]] "]"
                | "@" term
-               | term ("+" | "-" | "*") term
+               | term ("+" | "-" | "*" | "div" | "mod") term
                | "(" term ")"
 \end{verbatim}
 
@@ -460,12 +464,21 @@ and compare the Haskell and Rust implementations on canonicalized worlds.
 
 \section{External operations and project extensions}
 
-The portable executable profile defines integer arithmetic terms
-$+$, $-$, $*$, \verb|div|, and \verb|mod|.  The predicate
-$X\ \mathsf{is}\ E$ evaluates a ground expression $E$ and unifies $X$ with
-its integer result.  Comparisons require ground integer operands.  Division
-by zero fails without binding.  \verb|!=| and \verb|\=| abbreviate negated
-Herbrand equality.
+The portable executable profile defines arbitrary-precision integer arithmetic
+terms $+$, $-$, $*$, \verb|div|, and \verb|mod|.  Multiplication,
+\verb|div|, and \verb|mod| share one left-associative precedence level above
+addition and subtraction.  The prefix forms \verb|div(a,b)| and
+\verb|mod(a,b)| are equivalent functional spellings for the corresponding
+arithmetic expressions.
+
+For integers $a$ and nonzero $b$, $a\mathbin{\mathrm{div}}b$ is the quotient
+$q=\lfloor a/b\rfloor$, and $a\mathbin{\mathrm{mod}}b$ is the unique remainder
+$r=a-bq$.  Thus $r$ is zero or has the sign of $b$, and $|r|<|b|$.
+The predicate $X\ \mathsf{is}\ E$ evaluates a ground expression $E$ and
+unifies $X$ with its integer result.  Comparisons require ground integer
+operands.  Division by zero and nonground or noninteger arithmetic fail
+without binding and MUST NOT fall through to stored-predicate lookup.
+\verb|!=| and \verb|\=| abbreviate negated Herbrand equality.
 
 The project accepts \verb|eventually c| as a spelling of $\once c$ and
 \verb|next r| as the next-result operator.  These are conservative extensions
@@ -544,7 +557,8 @@ A release is conformant only when all of the following are true.
   remain observable, while only actual auxiliaries are hidden by default.
   \item Canonical sets of worlds agree for every shared scenario, including
   initial-world negation, corrected \verb|after|, recursive pattern
-  functions, unsupported classical blockers, and Section 4.7 nondeterminism.
+  functions, arbitrary-precision signed arithmetic, unsupported classical
+  blockers, and Section 4.7 nondeterminism.
   \item The stratified and general evaluators agree wherever condition~1
   holds.
   \item Benchmarks report workload parameters, iterations, elapsed time, and

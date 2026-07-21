@@ -97,3 +97,26 @@ fn recursion_limit_and_range_errors_are_not_logical_failure() {
     let unsafe_state = Interpreter::new(unsafe_program);
     assert!(unsafe_state.step_all().is_err());
 }
+
+#[test]
+fn arbitrary_precision_floor_division_and_invalid_arithmetic() {
+    let mut state = Interpreter::new(
+        compile(include_str!("../../conformance/cases/arithmetic_edges.tpl")).unwrap(),
+    );
+    state.step().unwrap();
+    assert!(contains(&state, "canonical_integer_spellings(7,0)"));
+    assert!(contains(&state, "quotient_negative(-3)"));
+    assert!(contains(&state, "remainder_negative(2)"));
+    assert!(contains(&state, "quotient_negative_divisor(-3)"));
+    assert!(contains(&state, "remainder_negative_divisor(-2)"));
+    assert!(contains(&state, "precedence(4)"));
+    assert!(contains(
+        &state,
+        "arbitrary_precision(85070591730234615865843651857942052864)"
+    ));
+    assert!(state
+        .world()
+        .unwrap()
+        .iter()
+        .all(|candidate| candidate.name != "division_by_zero_succeeded"));
+}

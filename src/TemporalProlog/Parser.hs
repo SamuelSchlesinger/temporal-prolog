@@ -56,6 +56,9 @@ symbol = L.symbol sc
 integer :: Parser Int
 integer = lexeme L.decimal
 
+integerLiteral :: Parser Integer
+integerLiteral = lexeme L.decimal
+
 -- Keywords
 reserved :: [String]
 reserved = ["since", "after", "for", "until", "atnext", "always", "eventually", "next", "true", "false", "is"]
@@ -149,8 +152,12 @@ pTermAdd = do
 pTermMul :: Parser Term
 pTermMul = do
   t <- pTermPrev
-  rest <- many $ do _ <- symbol "*"; r <- pTermPrev; return r
-  return $ foldl (\acc r -> TFun "*" [acc, r]) t rest
+  rest <- many $ choice
+    [ do _ <- symbol "*"; r <- pTermPrev; return ("*", r)
+    , do keyword "div"; r <- pTermPrev; return ("div", r)
+    , do keyword "mod"; r <- pTermPrev; return ("mod", r)
+    ]
+  return $ foldl (\acc (op, r) -> TFun op [acc, r]) t rest
 
 pTermPrev :: Parser Term
 pTermPrev = do
@@ -171,7 +178,7 @@ pTermAtom = choice
 pNumber :: Parser Term
 pNumber = try $ do
   neg <- optional (try (char '-' <* notFollowedBy (char '>')))
-  n <- integer
+  n <- integerLiteral
   let val = case neg of
               Just _  -> negate n
               Nothing -> n

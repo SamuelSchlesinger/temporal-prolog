@@ -29,3 +29,4 @@ name = "temporal-prolog-check-rs"
 path = "src/bin/check.rs"
 
 [dependencies]
+num-bigint = "0.4"

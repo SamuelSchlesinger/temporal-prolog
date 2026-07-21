@@ -1,4 +1,5 @@
 use crate::ast::*;
+use num_bigint::BigInt;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Token {
@@ -375,7 +376,9 @@ impl Parser {
         }
         if self.take(&Token::Op("-".into())) {
             return match self.bump() {
-                Some(Token::Number(number)) => Ok(Term::Fun(format!("-{number}"), vec![])),
+                Some(Token::Number(number)) => {
+                    Ok(Term::Fun(canonical_integer(&number, true)?, vec![]))
+                }
                 found => Err(format!("expected a number after unary -, found {found:?}")),
             };
         }
@@ -388,7 +391,9 @@ impl Parser {
             return self.parse_list();
         }
         match self.bump() {
-            Some(Token::Number(number)) => Ok(Term::Fun(number, vec![])),
+            Some(Token::Number(number)) => {
+                Ok(Term::Fun(canonical_integer(&number, false)?, vec![]))
+            }
             Some(Token::Ident(name)) => {
                 if name.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
                     return Ok(Term::Var(name));
@@ -437,6 +442,13 @@ impl Parser {
     }
 }
 
+fn canonical_integer(source: &str, negative: bool) -> Result<String, String> {
+    let magnitude = source
+        .parse::<BigInt>()
+        .map_err(|error| format!("invalid integer literal {source:?}: {error}"))?;
+    Ok(if negative { -magnitude } else { magnitude }.to_string())
+}
+
 fn term_to_atom(term: Term) -> Result<Atom, String> {
     match term {
         Term::Fun(name, terms) => Ok(Atom::new(name, terms)),
@@ -468,5 +480,41 @@ mod tests {
         let atom = parse_atom("value([a,b|T], 2 + 3 * 4)").unwrap();
         assert_eq!(atom.name, "value");
         assert_eq!(atom.terms.len(), 2);
+    }
+
+    #[test]
+    fn canonicalizes_arbitrary_precision_integer_spellings() {
+        let atom = parse_atom("value(0009223372036854775808,-0)").unwrap();
+        assert_eq!(
+            atom.terms,
+            vec![
+                Term::Fun("9223372036854775808".into(), vec![]),
+                Term::Fun("0".into(), vec![]),
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_infix_division_at_multiplicative_precedence() {
+        let atom = parse_atom("value(2 + 3 * 4 div 5)").unwrap();
+        assert_eq!(
+            atom.terms[0],
+            Term::Fun(
+                "+".into(),
+                vec![
+                    Term::Fun("2".into(), vec![]),
+                    Term::Fun(
+                        "div".into(),
+                        vec![
+                            Term::Fun(
+                                "*".into(),
+                                vec![Term::Fun("3".into(), vec![]), Term::Fun("4".into(), vec![]),],
+                            ),
+                            Term::Fun("5".into(), vec![]),
+                        ],
+                    ),
+                ],
+            )
+        );
     }
 }

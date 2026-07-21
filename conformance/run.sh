@@ -56,6 +56,7 @@ check_case term-previous conformance/cases/term_previous.tpl --steps 2 \
 check_case arithmetic conformance/cases/arithmetic.tpl \
   --assert '0:value(4)' --assert '0:value(5)' \
   --assert '0:pair(a,a)' --assert '0:pair(a,b)'
+check_case arithmetic-edges conformance/cases/arithmetic_edges.tpl
 check_case conditional-reduction conformance/cases/conditional_reduction.tpl \
   --assert '0:enabled(a)' --assert '0:request(a)'
 check_case auxiliary-collision conformance/cases/auxiliary_collision.tpl --steps 2 \

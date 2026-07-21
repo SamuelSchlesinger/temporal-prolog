@@ -1,4 +1,5 @@
 use crate::ast::*;
+use num_bigint::{BigInt, Sign};
 use std::collections::{BTreeMap, BTreeSet};
 
 const FIXPOINT_LIMIT: usize = 10_000;
@@ -464,10 +465,11 @@ fn evaluate_external(atom: &Atom, n: usize) -> Option<Vec<Subst>> {
         } else {
             vec![]
         }),
-        ("is", [result, expression]) => eval_arith(expression).map(|value| {
-            unify_terms(result, &Term::Fun(value.to_string(), vec![]))
+        ("is", [result, expression]) => Some(match eval_arith(expression) {
+            Some(value) => unify_terms(result, &Term::Fun(value.to_string(), vec![]))
                 .into_iter()
-                .collect()
+                .collect(),
+            None => vec![],
         }),
         (op @ (">" | "<" | ">=" | "<="), [left, right]) => {
             match (eval_arith(left), eval_arith(right)) {
@@ -483,6 +485,25 @@ fn evaluate_external(atom: &Atom, n: usize) -> Option<Vec<Subst>> {
                         vec![]
                     },
                 ),
+                _ => Some(vec![]),
+            }
+        }
+        _ => None,
+    }
+}
+
+fn eval_arith(term: &Term) -> Option<BigInt> {
+    match term {
+        Term::Fun(value, args) if args.is_empty() => value.parse().ok(),
+        Term::Fun(op, args) if args.len() == 2 => {
+            let left = eval_arith(&args[0])?;
+            let right = eval_arith(&args[1])?;
+            match op.as_str() {
+                "+" => Some(left + right),
+                "-" => Some(left - right),
+                "*" => Some(left * right),
+                "div" => floor_div_mod(left, right).map(|(quotient, _)| quotient),
+                "mod" => floor_div_mod(left, right).map(|(_, remainder)| remainder),
                 _ => None,
             }
         }
@@ -490,23 +511,17 @@ fn evaluate_external(atom: &Atom, n: usize) -> Option<Vec<Subst>> {
     }
 }
 
-fn eval_arith(term: &Term) -> Option<i64> {
-    match term {
-        Term::Fun(value, args) if args.is_empty() => value.parse().ok(),
-        Term::Fun(op, args) if args.len() == 2 => {
-            let left = eval_arith(&args[0])?;
-            let right = eval_arith(&args[1])?;
-            match op.as_str() {
-                "+" => left.checked_add(right),
-                "-" => left.checked_sub(right),
-                "*" => left.checked_mul(right),
-                "div" if right != 0 => left.checked_div(right),
-                "mod" if right != 0 => left.checked_rem(right),
-                _ => None,
-            }
-        }
-        _ => None,
+fn floor_div_mod(left: BigInt, right: BigInt) -> Option<(BigInt, BigInt)> {
+    if right.sign() == Sign::NoSign {
+        return None;
     }
+    let mut quotient = &left / &right;
+    let mut remainder = &left % &right;
+    if remainder.sign() != Sign::NoSign && remainder.sign() != right.sign() {
+        quotient -= 1;
+        remainder += &right;
+    }
+    Some((quotient, remainder))
 }
 
 fn solve_backward(

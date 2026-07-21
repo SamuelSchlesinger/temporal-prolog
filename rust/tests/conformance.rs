@@ -95,6 +95,29 @@ fn recursive_pattern_function() {
 }
 
 #[test]
+fn portable_arbitrary_precision_arithmetic() {
+    let mut state = Interpreter::new(
+        compile(include_str!("../../conformance/cases/arithmetic_edges.tpl")).unwrap(),
+    );
+    state.step().unwrap();
+    let world = state.world().unwrap();
+    for expected in [
+        "canonical_integer_spellings(7,0)",
+        "quotient_negative(-3)",
+        "remainder_negative(2)",
+        "quotient_negative_divisor(-3)",
+        "remainder_negative_divisor(-2)",
+        "precedence(4)",
+        "arbitrary_precision(85070591730234615865843651857942052864)",
+    ] {
+        assert!(world.contains(&atom(expected)), "missing {expected}");
+    }
+    assert!(world
+        .iter()
+        .all(|candidate| candidate.name != "division_by_zero_succeeded"));
+}
+
+#[test]
 fn shared_rejection_cases() {
     assert!(compile(include_str!("../../conformance/rejections/for_zero.tpl")).is_err());
     assert!(compile(include_str!(
