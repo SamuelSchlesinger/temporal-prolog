@@ -235,6 +235,10 @@ fn shared_rejection_cases() {
             "non-ASCII identifier",
             include_str!("../../conformance/rejections/non_ascii_identifier.tpl"),
         ),
+        (
+            "overflowing for count",
+            include_str!("../../conformance/rejections/for_count_overflow.tpl"),
+        ),
     ] {
         assert!(compile(source).is_err(), "accepted {name}: {source:?}");
     }

@@ -84,6 +84,7 @@ reject_case malformed-builtin conformance/rejections/malformed_builtin.tpl
 reject_case malformed-arithmetic conformance/rejections/malformed_arithmetic.tpl
 reject_case chained-temporal-condition conformance/rejections/chained_temporal_condition.tpl
 reject_case non-ascii-identifier conformance/rejections/non_ascii_identifier.tpl
+reject_case for-count-overflow conformance/rejections/for_count_overflow.tpl
 reject_case asserted-predicate-arity conformance/cases/initial_world.tpl \
   --assert '0:p(x)'
 reject_case asserted-constructor-arity conformance/cases/term_previous.tpl \

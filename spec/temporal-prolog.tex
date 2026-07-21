@@ -174,6 +174,9 @@ term         ::= variable | integer | name | call
                | "(" term ")"
 \end{verbatim}
 
+The \texttt{positive-integer} metavariable uses the same arbitrary-precision
+decimal domain as an integer term, but excludes zero and negative values.
+
 Unary operators bind most tightly.  Condition conjunction binds more tightly
 than \verb|since|, \verb|after|, and \verb|for|.  Those three binary past-time
 operators are non-associative; chained uses require parentheses.  Within a result,
@@ -496,6 +499,11 @@ The Haskell and Rust implementations execute the following common profile.
   \item Every variable used by a negated condition or a forward-chained head
   is grounded by positive body conditions, $\at(X)$, unification with a
   ground term, or a ground arithmetic evaluation before it is observed.
+  \item A parsed \verb|for| count is retained as an arbitrary-precision
+  positive integer.  The portable executable profile admits counts through
+  1,000 inclusive.  A larger count MUST be rejected as a normalization
+  resource error before expansion; it MUST NOT wrap, truncate, or depend on
+  the host machine's integer or pointer width.
   \item Candidate generation for a world reaches a finite fixed point within
   the configured fuel limit.  A program that generates an unbounded Herbrand
   base is rejected for that run.
@@ -619,9 +627,10 @@ A release is conformant only when all of the following are true.
   \item Both implementations parse every shared positive corpus case and
   reject every shared negative case.  Rejections include inconsistent symbol
   arities, non-ASCII identifiers, malformed pattern-function relational forms,
-  malformed external operation signatures, and external predicates used as
-  results or asserted world facts.  Positive cases exercise contextual keyword
-  reservation across predicate and constructor namespaces.  Runtime rejection
+  malformed external operation signatures, oversized \verb|for| counts, and
+  external predicates used as results or asserted world facts.  Positive cases
+  exercise contextual keyword reservation across predicate and constructor
+  namespaces.  Runtime rejection
   cases cover signature changes across source,
   pending input, and history; internal-name injection; term-level previous;
   and malformed arithmetic.  Public-query tests cover every external predicate

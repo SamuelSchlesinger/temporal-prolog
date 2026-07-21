@@ -1,5 +1,6 @@
 use crate::ast::*;
-use num_bigint::BigInt;
+use num_bigint::{BigInt, BigUint};
+use num_traits::Zero;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Token {
@@ -275,7 +276,7 @@ impl Parser {
         } else if self.take_keyword("for") {
             let count = match self.bump() {
                 Some(Token::Number(number)) => {
-                    number.parse::<usize>().map_err(|e| e.to_string())?
+                    number.parse::<BigUint>().map_err(|e| e.to_string())?
                 }
                 found => {
                     return Err(format!(
@@ -283,7 +284,7 @@ impl Parser {
                     ))
                 }
             };
-            if count == 0 {
+            if count.is_zero() {
                 return Err("the right operand of for must be positive".into());
             }
             Ok(Cond::For(Box::new(left), count))
@@ -647,7 +648,19 @@ mod tests {
     fn parses_since_after_and_for_conditions() {
         assert!(matches!(condition("a since b"), Ok(Cond::Since(_, _))));
         assert!(matches!(condition("a after b"), Ok(Cond::After(_, _))));
-        assert!(matches!(condition("a for 3"), Ok(Cond::For(_, 3))));
+        assert!(matches!(
+            condition("a for 3"),
+            Ok(Cond::For(_, count)) if count == BigUint::from(3u8)
+        ));
+    }
+
+    #[test]
+    fn preserves_arbitrary_precision_for_counts_before_normalization() {
+        assert!(matches!(
+            condition("a for 18446744073709551617"),
+            Ok(Cond::For(_, count))
+                if count == BigUint::parse_bytes(b"18446744073709551617", 10).unwrap()
+        ));
     }
 
     #[test]

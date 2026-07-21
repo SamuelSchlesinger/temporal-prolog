@@ -24,7 +24,8 @@ mixed predicate, constructor, and pattern-function arities; malformed
 pattern-function relational calls; malformed built-in and arithmetic
 signatures; and attempts to define an external built-in as a stored result.
 The negative corpus also rejects unparenthesized chains of non-associative
-past-time condition operators and non-ASCII identifiers. Positive lexical
+past-time condition operators, non-ASCII identifiers, and `for` counts beyond
+the portable executable expansion limit. Positive lexical
 cases verify contextual keyword reservation and the separation of arithmetic
 term operators from the predicate namespace. A positive lexical case executes
 every documented Unicode alias, including both previous-time dot glyphs, and

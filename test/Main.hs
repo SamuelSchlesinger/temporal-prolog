@@ -185,6 +185,10 @@ parserSpec = describe "Parser" $ do
     parseCond "<test>" "a after b" `shouldSatisfy` isRight
     parseCond "<test>" "a for 3" `shouldSatisfy` isRight
 
+  it "preserves arbitrary-precision for counts before normalization" $ do
+    parseCond "<test>" "a for 18446744073709551617" `shouldBe` Right
+      (CFor (CAtom (Atom "a" [])) 18446744073709551617)
+
   it "requires parentheses for chained past-time operators" $ do
     parseCond "<test>" "a since b since c" `shouldSatisfy` isLeft
     parseCond "<test>" "a after b after c" `shouldSatisfy` isLeft
@@ -335,6 +339,11 @@ normalizerSpec = describe "Normalizer" $ do
 
   it "rejects zero repetitions for 'for'" $ do
     parseCond "<test>" "a for 0" `shouldSatisfy` isLeft
+
+  it "enforces the portable for expansion limit without wrapping" $ do
+    compileSource "a for 1000 => b." `shouldSatisfy` isRight
+    compileSource "a for 1001 => b." `shouldSatisfy` isLeft
+    compileSource "a for 18446744073709551617 => b." `shouldSatisfy` isLeft
 
   it "normalizes programs with negation" $ do
     let np = parseAndNormalize "~a => b."
@@ -1264,6 +1273,7 @@ correctnessAndFeatureSpec = describe "Temporal operator semantics, parser extens
           , "(a /\\ b) since c"
           , "a since (b /\\ c)"
           , "(a since b) after (c for 2)"
+          , "a for 18446744073709551617"
           , "~(a /\\ b)"
           , "is(X, 2 + 3)"
           , "true()"
@@ -1411,6 +1421,7 @@ sharedConformanceSpec = describe "Shared Haskell/Rust conformance corpus" $ do
       , "malformed_arithmetic.tpl"
       , "chained_temporal_condition.tpl"
       , "non_ascii_identifier.tpl"
+      , "for_count_overflow.tpl"
       ] $ \filename -> do
         source <- readFile ("conformance/rejections/" ++ filename)
         compileSource source `shouldSatisfy` isLeft

@@ -56,9 +56,6 @@ lexeme = L.lexeme sc
 symbol :: String -> Parser String
 symbol = L.symbol sc
 
-integer :: Parser Int
-integer = lexeme L.decimal
-
 integerLiteral :: Parser Integer
 integerLiteral = lexeme L.decimal
 
@@ -276,7 +273,7 @@ pCondSinceAfterFor = do
     [ do kwSince; d <- pCondAnd; return (CSince c d)
     , do kwAfter; d <- pCondAnd; return (CAfter c d)
     , do kwFor
-         n <- integer
+         n <- integerLiteral
          if n > 0
            then return (CFor c n)
            else fail "the right operand of 'for' must be a positive integer"

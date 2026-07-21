@@ -1,5 +1,13 @@
 use crate::ast::*;
+use num_bigint::BigUint;
+use num_traits::{ToPrimitive, Zero};
 use std::collections::{BTreeMap, BTreeSet};
+
+/// Largest `for` count admitted by the portable executable profile.
+///
+/// Parsing retains an arbitrary-precision count; normalization checks this
+/// bound before expanding the source operator into previous-time conditions.
+pub const MAX_FOR_REPETITIONS: usize = 1000;
 
 pub fn normalize(program: Program) -> Result<NormalizedProgram, String> {
     validate_program_symbols(&program)?;
@@ -579,9 +587,18 @@ fn transform_step2(
             ])
         }
         Cond::For(inner, count) => {
-            if count == 0 {
+            if count.is_zero() {
                 return Err("the right operand of for must be positive".into());
             }
+            if count > BigUint::from(MAX_FOR_REPETITIONS) {
+                return Err(format!(
+                    "the right operand of for exceeds the executable limit of {MAX_FOR_REPETITIONS} repetitions"
+                ));
+            }
+            let count = count.to_usize().ok_or_else(|| {
+                "bounded for repetition count could not be represented by this implementation"
+                    .to_string()
+            })?;
             let mut conditions = (0..count)
                 .map(|depth| nest_prev(depth, (*inner).clone()))
                 .collect::<Vec<_>>();
@@ -708,8 +725,9 @@ fn step4_cond(cond: Cond, fresh: &mut Fresh) -> (Cond, Vec<SourceRule>, bool) {
             )
         }
         Cond::Prev(inner) => {
-            let (rewritten, extras, changed) = step4_cond(*inner, fresh);
-            (Cond::Prev(Box::new(rewritten)), extras, changed)
+            let (nested_depth, inner) = peel_previous(*inner);
+            let (rewritten, extras, changed) = step4_cond(inner, fresh);
+            (nest_prev(nested_depth + 1, rewritten), extras, changed)
         }
         Cond::And(conditions) => {
             let mut rewritten = Vec::new();
@@ -749,7 +767,13 @@ fn to_normal(rule: SourceRule) -> Result<NormalRule, String> {
 
 fn distribute_previous(cond: Cond, depth: usize) -> Result<Vec<NormalCond>, String> {
     match cond {
-        Cond::Prev(inner) => distribute_previous(*inner, depth + 1),
+        Cond::Prev(inner) => {
+            let (nested_depth, inner) = peel_previous(*inner);
+            let depth = depth
+                .checked_add(nested_depth + 1)
+                .ok_or("previous-time depth exceeds implementation capacity")?;
+            distribute_previous(inner, depth)
+        }
         Cond::And(conditions) => {
             let mut output = Vec::new();
             for condition in conditions {
@@ -787,8 +811,9 @@ fn expand_cond_terms(cond: Cond, pf: &BTreeSet<Name>, fresh: &mut Fresh) -> (Con
             (Cond::Neg(Box::new(c)), e)
         }
         Cond::Prev(inner) => {
-            let (c, e) = expand_cond_terms(*inner, pf, fresh);
-            (Cond::Prev(Box::new(c)), e)
+            let (nested_depth, inner) = peel_previous(*inner);
+            let (condition, extras) = expand_cond_terms(inner, pf, fresh);
+            (nest_prev(nested_depth + 1, condition), extras)
         }
         Cond::And(conditions) => {
             let mut output = Vec::new();
@@ -873,16 +898,19 @@ fn contains_pf(term: &Term, pf: &BTreeSet<Name>) -> bool {
 }
 
 fn has_step2(cond: &Cond) -> bool {
-    match cond {
-        Cond::HasBeen(_)
-        | Cond::Once(_)
-        | Cond::Since(_, _)
-        | Cond::After(_, _)
-        | Cond::For(_, _)
-        | Cond::Eventually(_) => true,
-        Cond::Neg(inner) | Cond::Prev(inner) => has_step2(inner),
-        Cond::And(conditions) => conditions.iter().any(has_step2),
-        Cond::Atom(_) => false,
+    let mut condition = cond;
+    loop {
+        match condition {
+            Cond::HasBeen(_)
+            | Cond::Once(_)
+            | Cond::Since(_, _)
+            | Cond::After(_, _)
+            | Cond::For(_, _)
+            | Cond::Eventually(_) => return true,
+            Cond::Neg(inner) | Cond::Prev(inner) => condition = inner,
+            Cond::And(conditions) => return conditions.iter().any(has_step2),
+            Cond::Atom(_) => return false,
+        }
     }
 }
 
@@ -899,6 +927,18 @@ fn nest_prev(depth: usize, mut cond: Cond) -> Cond {
         cond = Cond::Prev(Box::new(cond));
     }
     cond
+}
+fn peel_previous(mut cond: Cond) -> (usize, Cond) {
+    let mut depth = 0;
+    loop {
+        match cond {
+            Cond::Prev(inner) => {
+                depth += 1;
+                cond = *inner;
+            }
+            inner => return (depth, inner),
+        }
+    }
 }
 fn constant(name: &str) -> Term {
     Term::Fun(name.into(), vec![])
@@ -1145,6 +1185,13 @@ mod tests {
             .map(|condition| condition.depth)
             .collect();
         assert_eq!(depths, [0, 1, 2].into_iter().collect());
+    }
+
+    #[test]
+    fn enforces_the_portable_for_expansion_limit_without_wrapping() {
+        assert!(normalize(parse_program("a for 1000 => b.").unwrap()).is_ok());
+        assert!(normalize(parse_program("a for 1001 => b.").unwrap()).is_err());
+        assert!(normalize(parse_program("a for 18446744073709551617 => b.").unwrap()).is_err());
     }
 
     #[test]

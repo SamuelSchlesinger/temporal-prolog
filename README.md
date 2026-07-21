@@ -276,7 +276,10 @@ Arithmetic terms support infix `+`, `-`, `*`, `div`, and `mod`; `div` and
 `mod` have the same precedence as multiplication and associate to the left.
 Division rounds toward negative infinity, with the remainder taking the sign
 of the divisor. Division by zero and nonground or noninteger arithmetic fail
-without binding. The repetition count in `for` must be positive.
+without binding. The repetition count in `for` is parsed as an exact positive
+integer rather than a machine word. The portable executable profile admits at
+most 1,000 repetitions; larger counts are rejected as normalization resource
+errors before expansion, never truncated or wrapped.
 
 Both libraries can parse and pretty-print source ASTs without changing their
 structure. The Rust API exposes `parse_term`, `parse_condition`, `parse_result`,

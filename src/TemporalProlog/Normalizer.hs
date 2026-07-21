@@ -37,6 +37,7 @@ module TemporalProlog.Normalizer
   , NormalizationResult(..)
   , FreshNameGen(..)
   , FreshM
+  , maxForRepetitions
   , step1
   , step2
   , eliminateTermPrevM
@@ -244,6 +245,12 @@ freshName prefix = do
 -- | Maximum iterations for normalizer fixed-point loops
 maxNormalizerIterations :: Int
 maxNormalizerIterations = 1000
+
+-- | Largest @for@ count admitted by the portable executable profile.  The
+-- source AST retains arbitrary-precision counts; this bound is checked before
+-- expansion so an oversized count cannot wrap or exhaust normalization.
+maxForRepetitions :: Integer
+maxForRepetitions = 1000
 
 -- | Flatten a rule with conjunction in the body into a list of conditions
 flattenConds :: Cond -> [Cond]
@@ -470,8 +477,11 @@ transformStep2 cond r otherConds = case cond of
   CFor a n -> do
     if n <= 0
       then throwError "The right operand of 'for' must be a positive integer"
+      else if n > maxForRepetitions
+        then throwError $ "The right operand of 'for' exceeds the executable limit of "
+          ++ show maxForRepetitions ++ " repetitions"
       else do
-        let expanded = [nestPrev i a | i <- [0..n-1]]
+        let expanded = [nestPrev i a | i <- [0..fromInteger n - 1]]
         return [Rule (expanded ++ otherConds) r]
   CNeg inner | hasStep2Op inner -> do
     let allVars = Set.toList (fvCond inner)

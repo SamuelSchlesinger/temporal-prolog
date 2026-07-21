@@ -125,6 +125,7 @@ fn every_condition_form_round_trips() {
         "(a /\\ b) since c",
         "a since (b /\\ c)",
         "(a since b) after (c for 2)",
+        "a for 18446744073709551617",
         "~(a /\\ b)",
         "is(X, 2 + 3)",
         "true()",

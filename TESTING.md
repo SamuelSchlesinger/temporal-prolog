@@ -25,6 +25,11 @@ The shared corpus remains the strongest cross-implementation gate:
 sh conformance/run.sh
 ```
 
+Its rejection corpus includes an oversized arbitrary-precision `for` count,
+guarding against machine-word overflow and pointer-width-dependent parsing.
+Both unit suites also exercise the inclusive 1,000-repetition executable
+boundary and exact parse/print round trips above machine range.
+
 Run the implementation suites independently with:
 
 ```sh

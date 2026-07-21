@@ -1,3 +1,4 @@
+use num_bigint::BigUint;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -113,7 +114,7 @@ pub enum Cond {
     Once(Box<Cond>),
     Since(Box<Cond>, Box<Cond>),
     After(Box<Cond>, Box<Cond>),
-    For(Box<Cond>, usize),
+    For(Box<Cond>, BigUint),
     And(Vec<Cond>),
     Eventually(Box<Cond>),
 }

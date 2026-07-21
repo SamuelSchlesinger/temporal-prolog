@@ -60,6 +60,9 @@
 * Align every Unicode operator alias across both parsers, accept both documented
   previous-time dot glyphs, and preserve the distinct `once` and `eventually`
   source AST constructors.
+* Preserve arbitrary-precision `for` counts in both source ASTs, enforce a
+  shared 1,000-repetition normalization limit before expansion, and make deep
+  previous-time normalization stack-safe in Rust.
 
 ## 0.1.0.0 -- 2026-03-18
 

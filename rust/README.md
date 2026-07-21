@@ -12,6 +12,9 @@ input/output arity relationship for pattern functions and the reserved
 signatures of built-in operations. The interpreter preserves those signatures
 across runtime inputs and prior worlds, prevents assertion of internal
 relations, and evaluates built-ins through the public query API.
+Source `for` counts are likewise retained exactly. Compilation admits the
+portable limit of 1,000 repetitions and rejects larger counts before expansion,
+so behavior cannot depend on the host's pointer width.
 
 ```rust
 use temporal_prolog::{compile, Interpreter};

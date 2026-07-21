@@ -77,7 +77,7 @@ data Cond
   | COnce Cond           -- ?c  (was true at some past time including now)
   | CSince Cond Cond     -- c since d
   | CAfter Cond Cond     -- c after d (d occurred strictly before c)
-  | CFor Cond Int        -- c for n
+  | CFor Cond Integer    -- c for n (exact positive source integer)
   | CAnd [Cond]          -- c1 /\ c2 /\ ...
   | CEventually Cond     -- eventually / ◇ (synonym for once in past-time)
   deriving (Eq, Ord, Show)
