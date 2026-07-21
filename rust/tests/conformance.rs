@@ -154,6 +154,30 @@ fn documented_unicode_aliases_execute_together() {
 }
 
 #[test]
+fn arbitrary_precision_auxiliary_suffix_provenance_is_preserved() {
+    let program = compile(include_str!(
+        "../../conformance/cases/auxiliary_counter_overflow.tpl"
+    ))
+    .unwrap();
+    assert!(program
+        .auxiliary_predicates
+        .contains("next_aux18446744073709551616"));
+    let mut state = Interpreter::new(program);
+    state.step().unwrap();
+    state.step().unwrap();
+    for expected in [
+        "user_aux18446744073709551615",
+        "next_aux18446744073709551616",
+        "fired",
+    ] {
+        assert!(
+            state.world().unwrap().contains(&atom(expected)),
+            "missing {expected}"
+        );
+    }
+}
+
+#[test]
 fn contextual_names_follow_their_namespace() {
     let mut keyword_state = Interpreter::new(
         compile(include_str!(

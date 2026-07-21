@@ -70,6 +70,9 @@ check_case auxiliary-collision conformance/cases/auxiliary_collision.tpl --steps
   --assert 0:trigger
 check_case auxiliary-collision-internal conformance/cases/auxiliary_collision.tpl --steps 2 \
   --assert 0:trigger --include-internal
+check_case auxiliary-counter-overflow conformance/cases/auxiliary_counter_overflow.tpl --steps 2
+check_case auxiliary-counter-overflow-internal \
+  conformance/cases/auxiliary_counter_overflow.tpl --steps 2 --include-internal
 
 reject_case for-zero conformance/rejections/for_zero.tpl
 reject_case missing-period conformance/rejections/missing_period.tpl

@@ -15,6 +15,9 @@ relations, and evaluates built-ins through the public query API.
 Source `for` counts are likewise retained exactly. Compilation admits the
 portable limit of 1,000 repetitions and rejects larger counts before expansion,
 so behavior cannot depend on the host's pointer width.
+Generated-name counters are also arbitrary precision: a legal source name with
+an `_auxN` suffix above machine range remains observable and advances the next
+internal suffix exactly instead of overflowing.
 
 ```rust
 use temporal_prolog::{compile, Interpreter};

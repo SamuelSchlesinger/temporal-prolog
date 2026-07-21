@@ -30,6 +30,11 @@ guarding against machine-word overflow and pointer-width-dependent parsing.
 Both unit suites also exercise the inclusive 1,000-repetition executable
 boundary and exact parse/print round trips above machine range.
 
+Positive differential cases likewise place an `_auxN` source suffix at the
+64-bit boundary. Public output proves that the source predicate remains
+observable; internal output proves that both engines choose the exact same
+arbitrary-precision successor for generated predicates.
+
 Run the implementation suites independently with:
 
 ```sh

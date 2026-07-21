@@ -315,6 +315,20 @@ normalizerSpec = describe "Normalizer" $ do
           normalizedAuxiliaryPredicates normalized
             `shouldSatisfy` Set.notMember "user_aux0"
 
+  it "increments arbitrary-precision source auxiliary suffixes exactly" $ do
+    case parseProgram "<test>" $ unlines
+        [ "user_aux18446744073709551615."
+        , "trigger => next generated."
+        ] of
+      Left err -> expectationFailure (show err)
+      Right source -> case normalizeDetailed source of
+        Left err -> expectationFailure err
+        Right normalized -> do
+          normalizedAuxiliaryPredicates normalized
+            `shouldBe` Set.singleton "next_aux18446744073709551616"
+          normalizedAuxiliaryPredicates normalized
+            `shouldSatisfy` Set.notMember "user_aux18446744073709551615"
+
   it "reduces an unconditional atnext result to its trigger rule (paper step 1(4))" $ do
     let np = parseAndNormalize "ready atnext trigger."
     np `shouldBe`
@@ -1388,6 +1402,13 @@ sharedConformanceSpec = describe "Shared Haskell/Rust conformance corpus" $ do
     worldContains st "value(token)" `shouldBe` True
     worldContains st "next_fact" `shouldBe` True
     worldContains st "unicode_ok" `shouldBe` True
+
+  it "preserves arbitrary-precision auxiliary suffix provenance" $ do
+    src <- readFile "conformance/cases/auxiliary_counter_overflow.tpl"
+    let st = runWithAssertions src [] 2
+    worldContains st "user_aux18446744073709551615" `shouldBe` True
+    worldContains st "next_aux18446744073709551616" `shouldBe` True
+    worldContains st "fired" `shouldBe` True
 
   it "keeps keyword constructors and arithmetic predicate names contextual" $ do
     keywordSource <- readFile "conformance/cases/keyword_constructors.tpl"

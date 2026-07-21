@@ -132,7 +132,11 @@ world; runtime input MUST NOT introduce a conflicting arity.
 The concrete spelling \verb|prefix_auxN| is not reserved: a source predicate
 with that spelling remains a source predicate and MUST remain observable.
 Implementations therefore track generated predicates by normalization
-provenance rather than classifying names lexically.
+provenance rather than classifying names lexically.  When \texttt{N} is a
+nonempty decimal suffix, fresh-name allocation interprets it as an
+arbitrary-precision natural number and seeds the global counter strictly above
+the greatest such source suffix.  This calculation MUST NOT truncate, ignore,
+or overflow a suffix based on the host machine's integer or pointer width.
 
 \subsection{Grammar}
 
@@ -640,6 +644,8 @@ A release is conformant only when all of the following are true.
   fresh identifiers do not collide with source identifiers.  Generated-name
   provenance is exact: source identifiers resembling the fresh-name spelling
   remain observable, while only actual auxiliaries are hidden by default.
+  Arbitrary-precision source suffixes seed the same exact next fresh name in
+  both implementations.
   \item Canonical sets of worlds agree for every shared scenario, including
   initial-world negation, corrected \verb|after|, recursive pattern
   functions, arbitrary-precision signed arithmetic, unsupported classical

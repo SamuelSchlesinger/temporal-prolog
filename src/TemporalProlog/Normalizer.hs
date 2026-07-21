@@ -57,7 +57,7 @@ import TemporalProlog.Syntax
 -- | Counter for generating auxiliary predicate and variable names. The full
 -- normalizer seeds it above every source identifier ending in @_auxN@, which
 -- keeps generated identifiers fresh while preserving the public constructor.
-newtype FreshNameGen = FreshNameGen Int
+newtype FreshNameGen = FreshNameGen Integer
 
 -- | Fresh name generation monad with error reporting.
 type FreshM = ExceptT String (State FreshNameGen)
@@ -887,13 +887,13 @@ containsPatternFunction pfNames (TFun name terms) =
   name `Set.member` pfNames || any (containsPatternFunction pfNames) terms
 containsPatternFunction pfNames (TPrev term) = containsPatternFunction pfNames term
 
-freshStart :: Set.Set String -> Int
+freshStart :: Set.Set String -> Integer
 freshStart identifiers =
   case [n | identifier <- Set.toList identifiers, Just n <- [auxSuffix identifier]] of
     [] -> 0
     ns -> maximum ns + 1
 
-auxSuffix :: String -> Maybe Int
+auxSuffix :: String -> Maybe Integer
 auxSuffix identifier =
   let (digitsReversed, restReversed) = span isAsciiDigit (reverse identifier)
   in if null digitsReversed || take 4 restReversed /= "xua_"

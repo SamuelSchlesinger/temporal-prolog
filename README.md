@@ -66,7 +66,10 @@ step counts, out-of-horizon inputs, and runtime signature changes are rejected
 rather than ignored. Runtime signatures are checked against the compiled
 program, pending assertions, and all prior worlds.
 Generated predicates are tracked by normalization provenance, not guessed from
-their spelling, so source names such as `cache_aux0` remain fully visible.
+their spelling, so source names such as `cache_aux0` remain fully visible. A
+decimal suffix after `_aux` seeds the fresh-name counter at arbitrary precision;
+even suffixes beyond the host's machine-word range remain exact and cannot
+overflow normalization.
 Programs are signature-checked before normalization: each predicate and
 constructor has one arity in its own namespace, each pattern function has one
 input arity and an output-extended relational arity, and built-in predicates

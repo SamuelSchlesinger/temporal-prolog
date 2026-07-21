@@ -63,6 +63,9 @@
 * Preserve arbitrary-precision `for` counts in both source ASTs, enforce a
   shared 1,000-repetition normalization limit before expansion, and make deep
   previous-time normalization stack-safe in Rust.
+* Make generated-name counters arbitrary precision, so legal `_auxN` source
+  suffixes beyond machine range remain observable and advance fresh names
+  exactly instead of being ignored or overflowing.
 
 ## 0.1.0.0 -- 2026-03-18
 

@@ -1,6 +1,6 @@
 use crate::ast::*;
 use num_bigint::BigUint;
-use num_traits::{ToPrimitive, Zero};
+use num_traits::{One, ToPrimitive, Zero};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Largest `for` count admitted by the portable executable profile.
@@ -275,7 +275,7 @@ fn remember_signature(
 
 struct Fresh {
     used: BTreeSet<String>,
-    counter: usize,
+    counter: BigUint,
     generated: BTreeSet<String>,
 }
 
@@ -285,7 +285,7 @@ impl Fresh {
             .iter()
             .filter_map(|identifier| auxiliary_suffix(identifier))
             .max()
-            .map_or(0, |value| value + 1);
+            .map_or_else(BigUint::zero, |value| value + BigUint::one());
         Self {
             used,
             counter,
@@ -295,7 +295,7 @@ impl Fresh {
     fn name(&mut self, prefix: &str) -> String {
         loop {
             let name = format!("{prefix}_aux{}", self.counter);
-            self.counter += 1;
+            self.counter += BigUint::one();
             if self.used.insert(name.clone()) {
                 self.generated.insert(name.clone());
                 return name;
@@ -304,7 +304,7 @@ impl Fresh {
     }
 }
 
-fn auxiliary_suffix(identifier: &str) -> Option<usize> {
+fn auxiliary_suffix(identifier: &str) -> Option<BigUint> {
     let digit_count = identifier
         .chars()
         .rev()
@@ -1266,6 +1266,23 @@ mod tests {
             normalized.auxiliary_predicates,
             ["next_aux1".to_string()].into_iter().collect()
         );
+    }
+
+    #[test]
+    fn increments_arbitrary_precision_source_auxiliary_suffixes_exactly() {
+        let normalized = normalize(
+            parse_program("user_aux18446744073709551615. trigger => next generated.").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            normalized.auxiliary_predicates,
+            ["next_aux18446744073709551616".to_string()]
+                .into_iter()
+                .collect()
+        );
+        assert!(!normalized
+            .auxiliary_predicates
+            .contains("user_aux18446744073709551615"));
     }
 
     #[test]
