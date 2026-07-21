@@ -26,11 +26,12 @@ check_case() {
 reject_case() {
   case_name=$1
   program=$2
-  if "$haskell_runner" "$program" >/dev/null 2>&1; then
+  shift 2
+  if "$haskell_runner" "$program" "$@" >/dev/null 2>&1; then
     printf 'Haskell unexpectedly accepted %s\n' "$case_name" >&2
     exit 1
   fi
-  if "$rust_runner" "$program" >/dev/null 2>&1; then
+  if "$rust_runner" "$program" "$@" >/dev/null 2>&1; then
     printf 'Rust unexpectedly accepted %s\n' "$case_name" >&2
     exit 1
   fi
@@ -75,5 +76,21 @@ reject_case malformed-pattern-relation conformance/rejections/malformed_pattern_
 reject_case builtin-result conformance/rejections/builtin_result.tpl
 reject_case malformed-builtin conformance/rejections/malformed_builtin.tpl
 reject_case malformed-arithmetic conformance/rejections/malformed_arithmetic.tpl
+reject_case asserted-predicate-arity conformance/cases/initial_world.tpl \
+  --assert '0:p(x)'
+reject_case asserted-constructor-arity conformance/cases/term_previous.tpl \
+  --assert '0:present(key(a))'
+reject_case asserted-pattern-relation conformance/cases/append.tpl \
+  --assert '0:append([],[],[])'
+reject_case asserted-generated-predicate conformance/cases/future_results.tpl \
+  --assert 0:next_aux1
+reject_case historical-input-arity conformance/cases/initial_world.tpl \
+  --steps 2 --assert 0:event --assert '1:event(a)'
+reject_case asserted-builtin conformance/cases/initial_world.tpl \
+  --assert '0:at(0)'
+reject_case asserted-term-previous conformance/cases/initial_world.tpl \
+  --assert '0:event(@value)'
+reject_case asserted-malformed-arithmetic conformance/cases/initial_world.tpl \
+  --assert '0:event(div(1))'
 
 printf 'All cross-engine conformance cases agree.\n'

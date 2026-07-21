@@ -75,7 +75,10 @@ runModelCheckWithAuxiliaries
   -> Set Name
   -> Either String CheckResult
 runModelCheckWithAuxiliaries scenario program pfNames auxiliaryPredicates =
-  go 0 1 [root] [ActiveNode 0 (newInterpreterState program pfNames)] [] 0
+  go 0 1 [root]
+    [ActiveNode 0
+      (newInterpreterStateWithAuxiliaries program pfNames auxiliaryPredicates)]
+    [] 0
   where
     root = CheckNode 0 Nothing Nothing [] [] []
 

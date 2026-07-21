@@ -110,7 +110,9 @@ above and MAY occur only as conditions; they MUST NOT occur in rule results or
 be inserted into a world as external input.  The arithmetic symbols $+$, $-$,
 $*$, \verb|div|, and \verb|mod| have fixed arity two in term position.  An
 implementation MUST validate these constraints before normalization and reject
-the whole source program on a violation.
+the whole source program on a violation.  The same signatures remain fixed
+across runtime queries, pending assertions, and every previously computed
+world; runtime input MUST NOT introduce a conflicting arity.
 
 The concrete spelling \verb|prefix_auxN| is not reserved: a source predicate
 with that spelling remains a source predicate and MUST remain observable.
@@ -452,7 +454,17 @@ The Haskell and Rust implementations execute the following common profile.
 
 \begin{enumerate}
   \item Assertions supplied for a step are ground and form part of the fixed
-  external input for that step.
+  external input for that step.  They MUST preserve predicate and constructor
+  signatures established by the normalized program and all earlier or pending
+  assertions.  A newly introduced input symbol establishes its signature for
+  the remainder of the run.
+  \item Assertions MUST NOT use an external-predicate name, an internal
+  pattern-function relation, or a predicate introduced by normalization.
+  Runtime atoms MUST NOT contain a term-level \verb|@| wrapper or a malformed
+  arithmetic operator.
+  \item Query atoms obey the same signature rules and MUST NOT address
+  normalization-generated predicates.  Internal pattern-function relations
+  MAY be queried at their relational arity.
   \item Every variable used by a negated condition or a forward-chained head
   is grounded by positive body conditions, $\at(X)$, unification with a
   ground term, or a ground arithmetic evaluation before it is observed.
@@ -498,7 +510,10 @@ The remaining external predicates are Herbrand equality $=$, the four integer
 comparisons, \verb|at|/1 for the current world number, and the constants
 $\true$ and $\false$.  These operations are determined by the evaluator rather
 than world membership, so an implementation MUST reject them in scheduled
-assertions and model-checking input choices.
+assertions and model-checking input choices.  A public query API MUST evaluate
+these predicates by the same rules used for program conditions and return
+their substitutions; it MUST NOT treat a well-formed successful external query
+as an absent stored fact.
 
 The project accepts \verb|eventually c| as a spelling of $\once c$ and
 \verb|next r| as the next-result operator.  These are conservative extensions
@@ -512,6 +527,11 @@ and are tested by both implementations.
 \toprule
 Location & Published text or ambiguity & Normative resolution \\
 \midrule
+\endfirsthead
+\toprule
+Location & Published text or ambiguity & Normative resolution \\
+\midrule
+\endhead
 Section 3, \verb|after|; Step 2(4) &
 The prose requires a left-operand occurrence after a right-operand occurrence,
 but the printed recurrence merely remembers the more recent operand and is
@@ -572,7 +592,10 @@ A release is conformant only when all of the following are true.
   reject every shared negative case.  Rejections include inconsistent symbol
   arities, malformed pattern-function relational forms, malformed external
   operation signatures, and external predicates used as results or asserted
-  world facts.
+  world facts.  Runtime rejection cases cover signature changes across source,
+  pending input, and history; internal-name injection; term-level previous;
+  and malformed arithmetic.  Public-query tests cover every external predicate
+  family and its variable bindings.
   \item Normalization invariants hold: no surface temporal operator or
   term-level previous wrapper remains, every body condition is normal, and
   fresh identifiers do not collide with source identifiers.  Generated-name

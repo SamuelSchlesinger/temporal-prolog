@@ -127,7 +127,8 @@ cmdLoad st fp = do
               pfNames = normalizedPatternFunctions normalized
               auxNames = normalizedAuxiliaryPredicates normalized
           liftIO $ mapM_ (hPutStrLn stderr) (normalizationWarnings normalized)
-          let interp = newInterpreterState normProg pfNames
+          let interp =
+                newInterpreterStateWithAuxiliaries normProg pfNames auxNames
           outputStrLn $ "Loaded " ++ show (length (progRules prog)) ++ " rules and "
                       ++ show (length (progPatternFuncs prog)) ++ " pattern functions from " ++ fp
           return $ Just st { rsProgram  = prog
@@ -148,12 +149,11 @@ cmdAssert st factStr = case parseAtom "<repl>" factStr of
   Left err -> do
     outputStrLn $ "Parse error: " ++ errorBundlePretty err
     return (Just st)
-  Right atom ->
-    if isGroundAtom atom
-      then return $ Just st { rsInterp = assertFact atom (rsInterp st) }
-      else do
-        outputStrLn "Asserted facts must be ground (no variables)."
-        return (Just st)
+  Right atom -> case assertFactEither atom (rsInterp st) of
+    Left err -> do
+      outputStrLn $ "Error: " ++ err
+      return (Just st)
+    Right interp -> return $ Just st { rsInterp = interp }
 
 cmdQuery :: REPLState -> String -> InputT IO (Maybe REPLState)
 cmdQuery st queryStr = case parseAtom "<repl>" queryStr of
@@ -161,12 +161,13 @@ cmdQuery st queryStr = case parseAtom "<repl>" queryStr of
     outputStrLn $ "Parse error: " ++ errorBundlePretty err
     return (Just st)
   Right atom -> do
-    let results = queryAtom atom (rsInterp st)
-    if null results
-      then outputStrLn "No."
-      else do
-        outputStrLn "Yes."
-        mapM_ (\s -> outputStrLn $ "  " ++ showSubst s) results
+    case queryAtomEither atom (rsInterp st) of
+      Left err -> outputStrLn $ "Error: " ++ err
+      Right results
+        | null results -> outputStrLn "No."
+        | otherwise -> do
+            outputStrLn "Yes."
+            mapM_ (\s -> outputStrLn $ "  " ++ showSubst s) results
     return (Just st)
 
 cmdStep :: String -> REPLState -> InputT IO (Maybe REPLState)
@@ -281,7 +282,11 @@ handleProgramInput input st = case parseProgramItem "<repl>" input of
             auxNames = normalizedAuxiliaryPredicates normalized
         liftIO $ mapM_ (hPutStrLn stderr) (normalizationWarnings normalized)
         let oldInterp = rsInterp st
-            interp' = oldInterp { isProgram = normProg, isPFNames = pfNames }
+            interp' = oldInterp
+              { isProgram = normProg
+              , isPFNames = pfNames
+              , isAuxNames = auxNames
+              }
         outputStrLn addedMsg
         when (isJust (isWorldNum oldInterp)) $
           outputStrLn "Warning: past worlds were computed under the old program."
@@ -298,7 +303,7 @@ showHelp = do
   outputStrLn "  :load <file>    Load a Temporal Prolog program"
   outputStrLn "  :step [n]       Advance n worlds (default 1)"
   outputStrLn "  :assert <atom>  Assert a ground fact for the next step"
-  outputStrLn "  :query <atom>   Query the current world"
+  outputStrLn "  :query <atom>   Query facts, pattern functions, or built-ins"
   outputStrLn "  :world          Show the current world"
   outputStrLn "  :history        Show all past worlds"
   outputStrLn "  :program        Show the loaded program"

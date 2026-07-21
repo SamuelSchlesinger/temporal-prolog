@@ -62,7 +62,9 @@ cargo run --manifest-path rust/Cargo.toml --bin temporal-prolog-rs -- \
 Their output is byte-identical, including a digest of the complete raw state.
 Schedule external inputs with repeated `--assert STEP:ATOM` options and use
 `--include-internal` to display normalization auxiliaries. Invalid groundness,
-step counts, and out-of-horizon inputs are rejected rather than ignored.
+step counts, out-of-horizon inputs, and runtime signature changes are rejected
+rather than ignored. Runtime signatures are checked against the compiled
+program, pending assertions, and all prior worlds.
 Generated predicates are tracked by normalization provenance, not guessed from
 their spelling, so source names such as `cache_aux0` remain fully visible.
 Programs are signature-checked before normalization: each predicate and
@@ -70,7 +72,8 @@ constructor has one arity in its own namespace, each pattern function has one
 input arity and an output-extended relational arity, and built-in predicates
 and arithmetic operators have their specified signatures. Built-in predicates
 are conditions evaluated by the engine; they cannot be rule results or
-externally asserted facts.
+externally asserted facts. Pattern-function relations and generated predicates
+are likewise internal and cannot be injected through assertion streams.
 
 Run `sh conformance/run.sh` to execute the positive and negative shared corpus
 through both binaries and fail on any output or acceptance mismatch.
@@ -248,7 +251,7 @@ without binding. The repetition count in `for` must be positive.
 | `:load <file>`     | Load a Temporal Prolog program from file          |
 | `:step [n]`        | Advance n worlds (default 1)                      |
 | `:assert <atom>`   | Assert a ground fact for the next step            |
-| `:query <atom>`    | Query the current world (or pattern functions)    |
+| `:query <atom>`    | Query facts, pattern functions, or built-ins      |
 | `:world`           | Show facts in the current world                   |
 | `:history`         | Show all computed worlds                          |
 | `:program`         | Show source and normalized program                |
@@ -257,6 +260,12 @@ without binding. The repetition count in `for` must be positive.
 | `:reset`           | Reset the interpreter state                       |
 | `:help`            | Show help                                         |
 | `:quit`            | Exit the REPL                                     |
+
+Queries use the same external evaluator as rule conditions, so equality,
+arithmetic, comparisons, `at(N)`, `true`, and `false` return answers and
+bindings directly. For example, `:query X is 2 + 3` returns `X = 5`.
+Malformed signatures are reported as errors instead of being treated as
+logical failure.
 
 You can also type a rule directly at the prompt to add it to the program:
 
@@ -406,8 +415,10 @@ The implementation follows a five-phase pipeline:
      stratification since they don't participate in the forward-chaining
      fixed point.
 
-   External predicates (`=`, `>`, `<`, `>=`, `<=`, `at`, `true`, `false`)
-   are evaluated specially.
+   External predicates (`=`, `is`, `>`, `<`, `>=`, `<=`, `at`, `true`,
+   `false`) are evaluated specially in both rule conditions and public
+   queries. Runtime atoms are signature-checked before assertion or query;
+   generated predicates and pattern-function relations cannot be asserted.
 
 4. **Model-check** (`TemporalProlog.ModelChecker`): A breadth-first bounded
    explorer applies every Cartesian product of configured input choices to
@@ -424,7 +435,8 @@ The implementation follows a five-phase pipeline:
    complete histories, and hash the full raw state. The shared conformance gate
    compares byte-for-byte output across temporal operators, pattern functions,
    arithmetic, recursion through negation, fresh-name collisions, malformed
-   symbol signatures, built-in misuse, and the other specified rejection cases.
+   source and runtime signatures, built-in misuse, internal-name injection,
+   and the other specified rejection cases.
 
 At world 0, every previous-time formula `@F` is false, exactly as defined in
 Section 5.2. In particular, `@~p` is false there, while `~@p` is true; the

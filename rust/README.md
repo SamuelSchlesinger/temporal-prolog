@@ -9,7 +9,9 @@ Its integer extension uses arbitrary-precision values and the same signed
 floor-division semantics as the Haskell implementation. Compilation validates
 the paper's fixed symbol signatures before normalization, including the
 input/output arity relationship for pattern functions and the reserved
-signatures of built-in operations.
+signatures of built-in operations. The interpreter preserves those signatures
+across runtime inputs and prior worlds, prevents assertion of internal
+relations, and evaluates built-ins through the public query API.
 
 ```rust
 use temporal_prolog::{compile, Interpreter};

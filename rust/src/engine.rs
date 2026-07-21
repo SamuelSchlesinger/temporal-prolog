@@ -23,12 +23,8 @@ impl Interpreter {
     }
 
     pub fn assert(&mut self, atom: Atom) -> Result<(), String> {
-        if !atom.ground() {
-            return Err("assertions must be ground".into());
-        }
-        if is_external_atom(&atom) {
-            return Err("built-in external predicates cannot be asserted".into());
-        }
+        validate_assertion_namespace(&self.program, &atom)?;
+        validate_runtime_signatures(&self.program, &self.worlds, &self.assertions, Some(&atom))?;
         self.assertions.insert(atom);
         Ok(())
     }
@@ -50,7 +46,7 @@ impl Interpreter {
 
     /// Return one interpreter branch for every minimal current world.
     pub fn step_all(&self) -> Result<Vec<Self>, String> {
-        validate_assertions(&self.assertions)?;
+        validate_runtime_state(self)?;
         validate_profile(&self.program)?;
         let world_number = self.worlds.len();
         let (pf_rules, forward_rules) = partition_rules(&self.program);
@@ -90,7 +86,7 @@ impl Interpreter {
 
     /// Force the finite general evaluator for differential testing.
     pub fn step_general_all(&self) -> Result<Vec<Self>, String> {
-        validate_assertions(&self.assertions)?;
+        validate_runtime_state(self)?;
         validate_profile(&self.program)?;
         let n = self.worlds.len();
         let (pf, forward) = partition_rules(&self.program);
@@ -114,33 +110,144 @@ impl Interpreter {
     }
 
     pub fn query(&self, atom: &Atom) -> Result<Vec<Subst>, String> {
+        if self.program.auxiliary_predicates.contains(&atom.name) {
+            return Err("generated predicates cannot be queried".into());
+        }
+        validate_runtime_signatures(&self.program, &self.worlds, &self.assertions, Some(atom))?;
         let (pf_rules, _) = partition_rules(&self.program);
         let current = self.world().cloned().unwrap_or_default();
         let n = self.worlds.len().saturating_sub(1);
-        if self.program.pattern_functions.contains(&atom.name) {
-            solve_backward(
-                &self.program.pattern_functions,
-                &pf_rules,
-                atom,
-                &current,
-                &self.worlds,
-                n,
-                0,
-            )
-        } else {
-            Ok(match_world(atom, &current))
+        satisfy_positive(
+            &self.program.pattern_functions,
+            &pf_rules,
+            atom,
+            &current,
+            &self.worlds,
+            n,
+        )
+    }
+}
+
+fn validate_runtime_state(state: &Interpreter) -> Result<(), String> {
+    for atom in &state.assertions {
+        validate_assertion_namespace(&state.program, atom)?;
+    }
+    validate_runtime_signatures(&state.program, &state.worlds, &state.assertions, None)
+}
+
+fn validate_assertion_namespace(program: &NormalizedProgram, atom: &Atom) -> Result<(), String> {
+    if !atom.ground() {
+        return Err("assertions must be ground".into());
+    }
+    if is_external_atom(atom) {
+        return Err("built-in external predicates cannot be asserted".into());
+    }
+    if program.pattern_functions.contains(&atom.name) {
+        return Err("pattern-function relations cannot be asserted".into());
+    }
+    if program.auxiliary_predicates.contains(&atom.name) {
+        return Err("generated predicates cannot be asserted".into());
+    }
+    Ok(())
+}
+
+#[derive(Default)]
+struct RuntimeSignatures {
+    predicates: BTreeMap<Name, usize>,
+    constructors: BTreeMap<Name, usize>,
+}
+
+fn validate_runtime_signatures(
+    program: &NormalizedProgram,
+    worlds: &[World],
+    assertions: &World,
+    extra: Option<&Atom>,
+) -> Result<(), String> {
+    let mut signatures = RuntimeSignatures::default();
+    for rule in &program.rules {
+        validate_runtime_atom(&mut signatures, &rule.head)?;
+        for condition in &rule.conditions {
+            validate_runtime_atom(&mut signatures, &condition.atom)?;
+        }
+    }
+    for atom in worlds
+        .iter()
+        .flat_map(|world| world.iter())
+        .chain(assertions)
+        .chain(extra)
+    {
+        validate_runtime_atom(&mut signatures, atom)?;
+    }
+    Ok(())
+}
+
+fn validate_runtime_atom(signatures: &mut RuntimeSignatures, atom: &Atom) -> Result<(), String> {
+    if let Some(expected) = external_predicate_arity(&atom.name) {
+        if atom.terms.len() != expected {
+            return Err(format!(
+                "external predicate {:?} expects arity {expected}, found {}",
+                atom.name,
+                atom.terms.len()
+            ));
+        }
+    } else {
+        remember_runtime_signature(
+            &mut signatures.predicates,
+            "predicate",
+            &atom.name,
+            atom.terms.len(),
+        )?;
+    }
+    for term in &atom.terms {
+        validate_runtime_term(signatures, term)?;
+    }
+    Ok(())
+}
+
+fn validate_runtime_term(signatures: &mut RuntimeSignatures, term: &Term) -> Result<(), String> {
+    match term {
+        Term::Var(_) => Ok(()),
+        Term::Prev(_) => Err("term-level @ is not valid in runtime atoms".into()),
+        Term::Fun(name, terms) => {
+            if let Some(expected) = arithmetic_function_arity(name) {
+                if terms.len() != expected {
+                    return Err(format!(
+                        "arithmetic operator {name:?} expects arity {expected}, found {}",
+                        terms.len()
+                    ));
+                }
+            } else {
+                remember_runtime_signature(
+                    &mut signatures.constructors,
+                    "constructor",
+                    name,
+                    terms.len(),
+                )?;
+            }
+            for term in terms {
+                validate_runtime_term(signatures, term)?;
+            }
+            Ok(())
         }
     }
 }
 
-fn validate_assertions(assertions: &World) -> Result<(), String> {
-    if assertions.iter().any(|atom| !atom.ground()) {
-        return Err("assertions must be ground".into());
+fn remember_runtime_signature(
+    signatures: &mut BTreeMap<Name, usize>,
+    kind: &str,
+    name: &str,
+    arity: usize,
+) -> Result<(), String> {
+    match signatures.get(name) {
+        None => {
+            signatures.insert(name.to_string(), arity);
+            Ok(())
+        }
+        Some(expected) if *expected == arity => Ok(()),
+        Some(expected) => Err(format!(
+            "{kind} {name:?} has inconsistent arity: expected {expected}, found {arity}"
+        )),
     }
-    if assertions.iter().any(is_external_atom) {
-        return Err("built-in external predicates cannot be asserted".into());
-    }
-    Ok(())
 }
 
 fn partition_rules(program: &NormalizedProgram) -> (Vec<NormalRule>, Vec<NormalRule>) {
@@ -955,5 +1062,79 @@ mod tests {
         let mut direct = Interpreter::new(program);
         direct.assertions.insert(builtin);
         assert!(direct.step_all().is_err());
+    }
+
+    #[test]
+    fn evaluates_external_predicates_through_query() {
+        let state = Interpreter::new(compile("ok.").unwrap());
+        assert_eq!(state.query(&atom("1 = 1")).unwrap().len(), 1);
+        assert_eq!(state.query(&atom("1 < 2")).unwrap().len(), 1);
+        let arithmetic = state.query(&atom("X is 2 + 3")).unwrap();
+        assert_eq!(arithmetic[0].get("X"), Some(&Term::Fun("5".into(), vec![])));
+        let at = state.query(&atom("at(N)")).unwrap();
+        assert_eq!(at[0].get("N"), Some(&Term::Fun("0".into(), vec![])));
+        assert_eq!(state.query(&atom("true")).unwrap().len(), 1);
+        assert!(state.query(&atom("false")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn rejects_malformed_runtime_queries() {
+        let state = Interpreter::new(compile("lookup(X) -> X. present(key).").unwrap());
+        assert!(state.query(&atom("at(0,1)")).is_err());
+        assert!(state.query(&atom("present")).is_err());
+        assert!(state.query(&atom("present(key(a))")).is_err());
+        assert!(state.query(&atom("present(@key)")).is_err());
+    }
+
+    #[test]
+    fn rejects_runtime_signature_changes_even_through_public_state() {
+        let predicate = Interpreter::new(compile("p.").unwrap());
+        let wrong_predicate = atom("p(a)");
+        let mut checked = predicate.clone();
+        assert!(checked.assert(wrong_predicate.clone()).is_err());
+        let mut direct = predicate;
+        direct.assertions.insert(wrong_predicate);
+        assert!(direct.step_all().is_err());
+
+        let constructor = Interpreter::new(compile("value(box).").unwrap());
+        let wrong_constructor = atom("value(box(a))");
+        let mut checked = constructor.clone();
+        assert!(checked.assert(wrong_constructor.clone()).is_err());
+        let mut direct = constructor;
+        direct.assertions.insert(wrong_constructor);
+        assert!(direct.step_all().is_err());
+    }
+
+    #[test]
+    fn keeps_dynamic_input_signatures_fixed_across_worlds() {
+        let mut state = Interpreter::new(compile("ok.").unwrap());
+        state.assert(atom("event")).unwrap();
+        assert!(state.assert(atom("event(a)")).is_err());
+        state.step().unwrap();
+        assert!(state.assert(atom("event(a)")).is_err());
+        state.assertions.insert(atom("event(a)"));
+        assert!(state.step_all().is_err());
+    }
+
+    #[test]
+    fn rejects_internal_names_and_surface_terms_in_assertions() {
+        let mut pattern = Interpreter::new(compile("lookup(X) -> X.").unwrap());
+        let relation = atom("lookup(a,a)");
+        assert!(pattern.assert(relation.clone()).is_err());
+        pattern.assertions.insert(relation);
+        assert!(pattern.step_all().is_err());
+
+        let program = compile("trigger => next fired.").unwrap();
+        let generated = program.auxiliary_predicates.iter().next().unwrap().clone();
+        let generated_atom = Atom::new(generated, vec![]);
+        let mut generated_state = Interpreter::new(program);
+        assert!(generated_state.assert(generated_atom.clone()).is_err());
+        assert!(generated_state.query(&generated_atom).is_err());
+        generated_state.assertions.insert(generated_atom);
+        assert!(generated_state.step_all().is_err());
+
+        let mut surface = Interpreter::new(compile("ok.").unwrap());
+        assert!(surface.assert(atom("p(@a)")).is_err());
+        assert!(surface.assert(atom("p(div(1))")).is_err());
     }
 }

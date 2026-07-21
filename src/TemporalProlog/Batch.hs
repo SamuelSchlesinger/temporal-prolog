@@ -66,7 +66,8 @@ runBatchWithAuxiliaries
   -> Either String BatchResult
 runBatchWithAuxiliaries options program pfNames auxiliaryPredicates = do
   validateOptions options
-  branches <- go 0 [newInterpreterState program pfNames]
+  branches <- go 0
+    [newInterpreterStateWithAuxiliaries program pfNames auxiliaryPredicates]
   Right BatchResult
     { batchResultOptions = options
     , batchResultBranches = sortOn branchKey branches

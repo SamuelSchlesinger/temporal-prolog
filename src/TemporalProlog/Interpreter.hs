@@ -33,6 +33,7 @@
 module TemporalProlog.Interpreter
   ( InterpreterState(..)
   , newInterpreterState
+  , newInterpreterStateWithAuxiliaries
   , stepWorld
   , stepWorldAll
   , stepWorldGeneralAll
@@ -49,7 +50,7 @@ module TemporalProlog.Interpreter
   , traceDerivations
   ) where
 
-import Control.Monad (guard)
+import Control.Monad (foldM, guard)
 import Data.Graph (SCC(..), stronglyConnComp)
 import Data.List (partition, sort, sortOn)
 import qualified Data.IntMap.Strict as IntMap
@@ -70,16 +71,26 @@ data InterpreterState = InterpreterState
   , isWorldNum   :: Maybe Int     -- current world number (Nothing before first step)
   , isAssertions :: [GroundAtom]  -- facts asserted for the next step
   , isPFNames    :: Set Name      -- pattern-function predicate names (backward-chaining)
+  , isAuxNames   :: Set Name      -- generated predicates (not source-addressable)
   , isTraces     :: Map GroundAtom [NormalRule]  -- derivation provenance for current world
   } deriving (Show)
 
 newInterpreterState :: NormalProgram -> Set Name -> InterpreterState
-newInterpreterState prog pfNames = InterpreterState
+newInterpreterState prog pfNames =
+  newInterpreterStateWithAuxiliaries prog pfNames Set.empty
+
+-- | Construct an interpreter with exact normalization provenance. User-facing
+-- callers SHOULD use this form so runtime inputs cannot address generated
+-- predicates.
+newInterpreterStateWithAuxiliaries
+  :: NormalProgram -> Set Name -> Set Name -> InterpreterState
+newInterpreterStateWithAuxiliaries prog pfNames auxNames = InterpreterState
   { isProgram    = prog
   , isWorlds     = IntMap.empty
   , isWorldNum   = Nothing
   , isAssertions = []
   , isPFNames    = pfNames
+  , isAuxNames   = auxNames
   , isTraces     = Map.empty
   }
 
@@ -102,12 +113,9 @@ assertFact a st = st { isAssertions = a : isAssertions st }
 -- 'assertFact' constructor remains source compatible, but 'stepWorld' also
 -- rejects any non-ground assertion before it can enter a world.
 assertFactEither :: GroundAtom -> InterpreterState -> Either String InterpreterState
-assertFactEither atom state
-  | not (isGroundAtom atom) =
-      Left "Asserted facts must be ground (no variables)"
-  | isExternalAtom atom =
-      Left "Built-in external predicates cannot be asserted"
-  | otherwise = Right (assertFact atom state)
+assertFactEither atom state = do
+  validateAssertionAtoms state [atom]
+  Right (assertFact atom state)
 
 -- | Query whether an atom matches anything in the current world.
 --   For pattern-function predicates, dispatches to the backward chainer
@@ -119,7 +127,8 @@ queryAtom pat st = either (const []) id (queryAtomEither pat st)
 -- maps errors to no answers for API compatibility; conformance-sensitive
 -- callers MUST use this function.
 queryAtomEither :: Atom -> InterpreterState -> Either String [Subst]
-queryAtomEither pat st =
+queryAtomEither pat st = do
+  validateQueryAtom st pat
   let pfNames = isPFNames st
       prog = isProgram st
       (pfRules, _) = partition (\r -> predName (nrHead r) `Set.member` pfNames) prog
@@ -127,12 +136,8 @@ queryAtomEither pat st =
         Nothing -> 0
         Just n  -> n
       worlds = isWorlds st
-  in if predName pat `Set.member` pfNames
-     then solveBackward pfNames pfRules pat
-            (maybe emptyWorld id (currentWorld st)) worlds worldNum 0
-     else Right $ case currentWorld st of
-            Nothing -> []
-            Just w  -> matchInWorld pat w
+      world = maybe emptyWorld id (currentWorld st)
+  satisfyPositive pfNames pfRules pat world worlds worldNum
 
 -- | Test whether an atom pattern matches a stored fact in a world.  Unlike
 -- 'queryAtomEither', this never invokes pattern-function relations.
@@ -183,12 +188,7 @@ stepWorldWith computer st =
       prog = isProgram st
       pfNames = isPFNames st
   in do
-    if all isGroundAtom (isAssertions st)
-      then Right ()
-      else Left "Asserted facts must be ground (no variables)"
-    if all (not . isExternalAtom) (isAssertions st)
-      then Right ()
-      else Left "Built-in external predicates cannot be asserted"
+    validateAssertionAtoms st (isAssertions st)
     validateExecutableProfile prog pfNames
     computed <- computer prog pfNames worlds assertions worldNum
     Right
@@ -199,6 +199,105 @@ stepWorldWith computer st =
            }
       | (newWorld, traces) <- computed
       ]
+
+-- ============================================================
+-- Runtime atom validation
+-- ============================================================
+
+data RuntimeSignatures = RuntimeSignatures
+  { runtimePredicates   :: Map Name Int
+  , runtimeConstructors :: Map Name Int
+  }
+
+emptyRuntimeSignatures :: RuntimeSignatures
+emptyRuntimeSignatures = RuntimeSignatures Map.empty Map.empty
+
+-- | Validate assertions at both the namespace and signature boundaries.
+-- The full pending set is checked together so the legacy 'assertFact' API and
+-- direct record updates cannot bypass validation at step time.
+validateAssertionAtoms :: InterpreterState -> [Atom] -> Either String ()
+validateAssertionAtoms state atoms = do
+  mapM_ validateAssertionNamespace atoms
+  validateRuntimeSignatures state atoms
+  where
+    validateAssertionNamespace atom
+      | not (isGroundAtom atom) =
+          Left "Asserted facts must be ground (no variables)"
+      | isExternalAtom atom =
+          Left "Built-in external predicates cannot be asserted"
+      | predName atom `Set.member` isPFNames state =
+          Left "Pattern-function relations cannot be asserted"
+      | predName atom `Set.member` isAuxNames state =
+          Left "Generated predicates cannot be asserted"
+      | otherwise = Right ()
+
+validateQueryAtom :: InterpreterState -> Atom -> Either String ()
+validateQueryAtom state atom
+  | predName atom `Set.member` isAuxNames state =
+      Left "Generated predicates cannot be queried"
+  | otherwise = validateRuntimeSignatures state [atom]
+
+validateRuntimeSignatures :: InterpreterState -> [Atom] -> Either String ()
+validateRuntimeSignatures state extraAtoms = do
+  _ <- foldM validateRuntimeAtom emptyRuntimeSignatures allAtoms
+  Right ()
+  where
+    allAtoms =
+      concatMap normalRuleAtoms (isProgram state)
+      ++ concatMap (Set.toList . worldToSet) (IntMap.elems (isWorlds state))
+      ++ isAssertions state
+      ++ extraAtoms
+    normalRuleAtoms rule = nrHead rule : map ncAtom (nrConditions rule)
+
+validateRuntimeAtom :: RuntimeSignatures -> Atom -> Either String RuntimeSignatures
+validateRuntimeAtom signatures (Atom name terms) = do
+  predicateSignatures <- case externalPredicateArity name of
+    Just expected
+      | expected /= length terms -> Left $
+          "External predicate '" ++ name ++ "' expects arity "
+          ++ show expected ++ ", found " ++ show (length terms)
+      | otherwise -> Right signatures
+    Nothing -> rememberRuntimePredicate name (length terms) signatures
+  foldM validateRuntimeTerm predicateSignatures terms
+
+validateRuntimeTerm :: RuntimeSignatures -> Term -> Either String RuntimeSignatures
+validateRuntimeTerm _ (TPrev _) =
+  Left "Term-level @ is not valid in runtime atoms"
+validateRuntimeTerm signatures (TVar _) = Right signatures
+validateRuntimeTerm signatures (TFun name terms) = do
+  constructorSignatures <- case arithmeticFunctionArity name of
+    Just expected
+      | expected /= length terms -> Left $
+          "Arithmetic operator '" ++ name ++ "' expects arity "
+          ++ show expected ++ ", found " ++ show (length terms)
+      | otherwise -> Right signatures
+    Nothing -> rememberRuntimeConstructor name (length terms) signatures
+  foldM validateRuntimeTerm constructorSignatures terms
+
+rememberRuntimePredicate
+  :: Name -> Int -> RuntimeSignatures -> Either String RuntimeSignatures
+rememberRuntimePredicate name arity signatures =
+  case Map.lookup name (runtimePredicates signatures) of
+    Nothing -> Right signatures
+      { runtimePredicates = Map.insert name arity (runtimePredicates signatures) }
+    Just expected
+      | expected == arity -> Right signatures
+      | otherwise -> Left $
+          "Predicate '" ++ name ++ "' has inconsistent arity: expected "
+          ++ show expected ++ ", found " ++ show arity
+
+rememberRuntimeConstructor
+  :: Name -> Int -> RuntimeSignatures -> Either String RuntimeSignatures
+rememberRuntimeConstructor name arity signatures =
+  case Map.lookup name (runtimeConstructors signatures) of
+    Nothing -> Right signatures
+      { runtimeConstructors =
+          Map.insert name arity (runtimeConstructors signatures) }
+    Just expected
+      | expected == arity -> Right signatures
+      | otherwise -> Left $
+          "Constructor '" ++ name ++ "' has inconsistent arity: expected "
+          ++ show expected ++ ", found " ++ show arity
 
 -- | Step N worlds
 stepWorldN :: Int -> InterpreterState -> Either String InterpreterState

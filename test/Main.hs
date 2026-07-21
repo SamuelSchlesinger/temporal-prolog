@@ -28,6 +28,7 @@ main = hspec $ do
   stratificationSpec
   safetyValidationSpec
   edgeCaseSpec
+  runtimeBoundarySpec
   mixedTPrevSpec
   backwardChainingSpec
   correctnessAndFeatureSpec
@@ -704,6 +705,89 @@ edgeCaseSpec = describe "Edge cases" $ do
     let prog = "p(X) /\\ X = X => q(X).\n"
     let st = runWithAssertions prog [(0, ["p(a)"])] 1
     worldContains st "q(a)" `shouldBe` True
+
+-- ============================================================
+-- Runtime query and input boundaries
+-- ============================================================
+
+runtimeBoundarySpec :: Spec
+runtimeBoundarySpec = describe "Runtime query and input validation" $ do
+  it "evaluates external predicates through the public query API" $ do
+    let state = unsafeStep (newInterpreterState [] Set.empty)
+        integer value = TFun value []
+    queryAtomEither (Atom "=" [integer "1", integer "1"]) state
+      `shouldBe` Right [Map.empty]
+    queryAtomEither (Atom "<" [integer "1", integer "2"]) state
+      `shouldBe` Right [Map.empty]
+    queryAtomEither
+      (Atom "is" [TVar "X", TFun "+" [integer "2", integer "3"]]) state
+      `shouldBe` Right [Map.singleton "X" (integer "5")]
+    queryAtomEither (Atom "at" [TVar "N"]) state
+      `shouldBe` Right [Map.singleton "N" (integer "0")]
+    queryAtomEither (Atom "true" []) state `shouldBe` Right [Map.empty]
+    queryAtomEither (Atom "false" []) state `shouldBe` Right []
+
+  it "rejects malformed runtime queries instead of treating them as false" $ do
+    let (program, pfNames) = parseAndNormalizeWithPF
+          "lookup(X) -> X. present(key)."
+        state = newInterpreterState program pfNames
+    queryAtomEither (Atom "at" [TFun "0" [], TFun "1" []]) state
+      `shouldSatisfy` isLeft
+    queryAtomEither (Atom "present" []) state `shouldSatisfy` isLeft
+    queryAtomEither
+      (Atom "present" [TFun "key" [TFun "a" []]]) state
+      `shouldSatisfy` isLeft
+    queryAtomEither
+      (Atom "present" [TPrev (TFun "key" [])]) state
+      `shouldSatisfy` isLeft
+
+  it "rejects predicate and constructor signature changes in assertions" $ do
+    let predicateProgram = parseAndNormalize "p."
+        predicateState = newInterpreterState predicateProgram Set.empty
+        wrongPredicate = Atom "p" [TFun "a" []]
+        constructorProgram = parseAndNormalize "value(box)."
+        constructorState = newInterpreterState constructorProgram Set.empty
+        wrongConstructor = Atom "value" [TFun "box" [TFun "a" []]]
+    assertFactEither wrongPredicate predicateState `shouldSatisfy` isLeft
+    stepWorld (assertFact wrongPredicate predicateState) `shouldSatisfy` isLeft
+    assertFactEither wrongConstructor constructorState `shouldSatisfy` isLeft
+    stepWorld (assertFact wrongConstructor constructorState) `shouldSatisfy` isLeft
+
+  it "keeps dynamically introduced signatures fixed across pending and past inputs" $ do
+    let emptyState = newInterpreterState [] Set.empty
+        event0 = Atom "event" []
+        event1 = Atom "event" [TFun "a" []]
+        pendingAssertions = assertFact event0 emptyState
+        firstWorld = unsafeStep pendingAssertions
+    assertFactEither event1 pendingAssertions `shouldSatisfy` isLeft
+    assertFactEither event1 firstWorld `shouldSatisfy` isLeft
+    stepWorld (assertFact event1 firstWorld) `shouldSatisfy` isLeft
+
+  it "rejects pattern-function and generated predicates as asserted facts" $ do
+    let (pfProgram, pfNames) = parseAndNormalizeWithPF "lookup(X) -> X."
+        pfState = newInterpreterState pfProgram pfNames
+        pfAtom = Atom "lookup" [TFun "a" [], TFun "a" []]
+    assertFactEither pfAtom pfState `shouldSatisfy` isLeft
+    stepWorld (assertFact pfAtom pfState) `shouldSatisfy` isLeft
+    case compileDetailedSource "trigger => next fired." of
+      Left err -> expectationFailure err
+      Right normalized -> do
+        let state = newInterpreterStateWithAuxiliaries
+              (normalizedProgram normalized)
+              (normalizedPatternFunctions normalized)
+              (normalizedAuxiliaryPredicates normalized)
+            generated = Set.findMin (normalizedAuxiliaryPredicates normalized)
+            atom = Atom generated []
+        assertFactEither atom state `shouldSatisfy` isLeft
+        stepWorld (assertFact atom state) `shouldSatisfy` isLeft
+        queryAtomEither atom state `shouldSatisfy` isLeft
+
+  it "rejects term-level previous and malformed arithmetic in assertions" $ do
+    let state = newInterpreterState [] Set.empty
+    assertFactEither (Atom "p" [TPrev (TFun "a" [])]) state
+      `shouldSatisfy` isLeft
+    assertFactEither (Atom "p" [TFun "div" [TFun "1" []]]) state
+      `shouldSatisfy` isLeft
 
 -- ============================================================
 -- N. Term-level previous values in pattern-function expansion

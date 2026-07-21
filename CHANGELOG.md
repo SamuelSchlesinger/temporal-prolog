@@ -44,6 +44,9 @@
 * Validate fixed predicate, constructor, pattern-function, built-in, and
   arithmetic signatures before normalization; reject built-ins in rule results
   and external assertion streams in both implementations.
+* Enforce symbol signatures across runtime assertions and prior worlds, block
+  injection of pattern-function relations and generated predicates, and make
+  public queries evaluate external predicates with bindings in both engines.
 
 ## 0.1.0.0 -- 2026-03-18
 
