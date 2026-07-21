@@ -113,6 +113,7 @@ impl Interpreter {
         if self.program.auxiliary_predicates.contains(&atom.name) {
             return Err("generated predicates cannot be queried".into());
         }
+        validate_pattern_query(&self.program, atom)?;
         validate_runtime_signatures(&self.program, &self.worlds, &self.assertions, Some(atom))?;
         let (pf_rules, _) = partition_rules(&self.program);
         let current = self.world().cloned().unwrap_or_default();
@@ -942,33 +943,54 @@ fn model_smaller(components: &[BTreeSet<Name>], left: &World, right: &World) -> 
 }
 
 fn validate_profile(program: &NormalizedProgram) -> Result<(), String> {
-    for rule in program
-        .rules
-        .iter()
-        .filter(|r| !program.pattern_functions.contains(&r.head.name))
-    {
+    let pattern_arities = pattern_function_input_arities(program);
+    for rule in &program.rules {
         let positives: Vec<_> = rule.conditions.iter().filter(|c| !c.negated).collect();
-        let mut bound = BTreeSet::new();
+        let (mut bound, head_observed) = match pattern_arities.get(&rule.head.name).copied() {
+            Some(input_arity) => (
+                rule.head
+                    .terms
+                    .iter()
+                    .take(input_arity)
+                    .flat_map(Term::vars)
+                    .collect(),
+                rule.head
+                    .terms
+                    .iter()
+                    .skip(input_arity)
+                    .flat_map(Term::vars)
+                    .collect::<BTreeSet<_>>(),
+            ),
+            None => (BTreeSet::new(), rule.head.vars()),
+        };
         loop {
             let before = bound.clone();
             for condition in &positives {
-                bind_from_atom(&condition.atom, &mut bound);
+                bind_from_atom(&condition.atom, &mut bound, &pattern_arities);
             }
             if bound == before {
                 break;
             }
         }
-        let observed: BTreeSet<_> = rule
-            .head
-            .vars()
-            .into_iter()
-            .chain(
-                rule.conditions
-                    .iter()
-                    .filter(|c| c.negated)
-                    .flat_map(|c| c.atom.vars()),
-            )
-            .collect();
+        let mut observed = head_observed;
+        for condition in &positives {
+            if let Some(input_arity) = pattern_arities.get(&condition.atom.name).copied() {
+                observed.extend(
+                    condition
+                        .atom
+                        .terms
+                        .iter()
+                        .take(input_arity)
+                        .flat_map(Term::vars),
+                );
+            }
+        }
+        observed.extend(
+            rule.conditions
+                .iter()
+                .filter(|c| c.negated)
+                .flat_map(|c| c.atom.vars()),
+        );
         let unsafe_vars: Vec<_> = observed.difference(&bound).cloned().collect();
         if !unsafe_vars.is_empty() {
             return Err(format!(
@@ -979,7 +1001,51 @@ fn validate_profile(program: &NormalizedProgram) -> Result<(), String> {
     Ok(())
 }
 
-fn bind_from_atom(atom: &Atom, bound: &mut BTreeSet<Var>) {
+fn pattern_function_input_arities(program: &NormalizedProgram) -> BTreeMap<Name, usize> {
+    program
+        .rules
+        .iter()
+        .filter(|rule| program.pattern_functions.contains(&rule.head.name))
+        .filter_map(|rule| {
+            rule.head
+                .terms
+                .len()
+                .checked_sub(1)
+                .map(|arity| (rule.head.name.clone(), arity))
+        })
+        .collect()
+}
+
+fn validate_pattern_query(program: &NormalizedProgram, atom: &Atom) -> Result<(), String> {
+    if let Some(input_arity) = pattern_function_input_arities(program)
+        .get(&atom.name)
+        .copied()
+    {
+        if atom
+            .terms
+            .iter()
+            .take(input_arity)
+            .any(|term| !term.ground())
+        {
+            return Err("pattern-function query inputs must be ground".into());
+        }
+    }
+    Ok(())
+}
+
+fn bind_from_atom(atom: &Atom, bound: &mut BTreeSet<Var>, pattern_arities: &BTreeMap<Name, usize>) {
+    if let Some(input_arity) = pattern_arities.get(&atom.name).copied() {
+        let input_vars: BTreeSet<_> = atom
+            .terms
+            .iter()
+            .take(input_arity)
+            .flat_map(Term::vars)
+            .collect();
+        if input_vars.is_subset(bound) {
+            bound.extend(atom.terms.iter().skip(input_arity).flat_map(Term::vars));
+        }
+        return;
+    }
     match (atom.name.as_str(), atom.terms.as_slice()) {
         ("true" | "false" | ">" | "<" | ">=" | "<=", _) => {}
         ("=", [left, right]) => {

@@ -14,6 +14,8 @@
 * Identify and specify the overlooked third minimal model in paper Section 4.7.
 * Report pattern-function recursion exhaustion as a resource error and enforce
   the executable profile's term-level previous and range restrictions.
+* Enforce the normalized pattern-function input/output mode: calls and public
+  queries require ground inputs, and clauses must ground their result.
 * Add an independent Rust parser, normalizer, backward chainer, and world
   evaluator, plus a shared cross-language conformance corpus.
 * Add matched, digest-checked Haskell/Rust benchmark harnesses and a normative

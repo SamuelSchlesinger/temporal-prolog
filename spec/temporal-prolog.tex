@@ -120,9 +120,10 @@ Every internal pattern-function name has one input arity $k$ across all of its
 reductions.  Its term form has arity $k$, while its relational atom form has
 arity $k+1$, with the final argument denoting the result.  Once a reduction
 declares a pattern-function spelling, other uses of that spelling MUST obey
-these two signatures.  External predicates have the fixed signatures listed
-above and MAY occur only as conditions; they MUST NOT occur in rule results or
-be inserted into a world as external input.  The arithmetic symbols $+$, $-$,
+these two signatures.  The first $k$ relation positions are ground inputs; a
+successful call grounds the final output.  External predicates have the fixed
+signatures listed above and MAY occur only as conditions; they MUST NOT occur
+in rule results or be inserted into a world as external input.  The arithmetic symbols $+$, $-$,
 $*$, \verb|div|, and \verb|mod| have fixed arity two in term position.  An
 implementation MUST validate these constraints before normalization and reject
 the whole source program on a violation.  The same signatures remain fixed
@@ -499,10 +500,14 @@ The Haskell and Rust implementations execute the following common profile.
   arithmetic operator.
   \item Query atoms obey the same signature rules and MUST NOT address
   normalization-generated predicates.  Internal pattern-function relations
-  MAY be queried at their relational arity.
-  \item Every variable used by a negated condition or a forward-chained head
-  is grounded by positive body conditions, $\at(X)$, unification with a
-  ground term, or a ground arithmetic evaluation before it is observed.
+  MAY be queried only at relational arity with $k$ ground inputs; the final
+  output MAY contain variables.
+  \item Every variable in a negated condition, forward-chained head, or
+  pattern-function input position is grounded by positive body conditions,
+  $\at(X)$, unification with a ground term, or ground arithmetic before it is
+  observed.  A pattern-function call binds only its final output after its
+  inputs are ground.  Its clauses begin with head inputs ground and MUST
+  ground the head output from those inputs and positive body conditions.
   \item A parsed \verb|for| count is retained as an arbitrary-precision
   positive integer.  The portable executable profile admits counts through
   1,000 inclusive.  A larger count MUST be rejected as a normalization
@@ -632,16 +637,14 @@ A release is conformant only when all of the following are true.
 
 \begin{enumerate}
   \item Both implementations parse every shared positive corpus case and
-  reject every shared negative case.  Rejections cover symbol-arity conflicts,
-  non-ASCII identifiers, malformed pattern-function and external-operation
-  signatures, oversized \verb|for| counts, and external predicates used as
-  results or assertions.  Positive cases
-  exercise contextual keyword reservation across predicate and constructor
-  namespaces.  Runtime rejection
-  cases cover signature changes across source,
-  pending input, and history; internal-name injection; term-level previous;
-  and malformed arithmetic.  Public-query tests cover every external predicate
-  family and its variable bindings.
+  reject every shared negative case.  Rejections cover arity conflicts,
+  non-ASCII identifiers, malformed pattern-function or external signatures,
+  oversized \verb|for| counts, and external results or assertions.  Positive
+  cases cover contextual keyword namespaces.  Runtime cases reject signature
+  changes across source, input, and history; internal-name injection;
+  term-level previous; malformed arithmetic; unsafe pattern-function modes;
+  and query-mode violations.  Public queries also test every external
+  predicate family's bindings.
   \item Normalization invariants hold: no surface temporal operator or
   term-level previous wrapper remains, every body condition is normal, and
   fresh identifiers do not collide with source identifiers.  Generated-name

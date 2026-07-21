@@ -232,10 +232,16 @@ validateAssertionAtoms state atoms = do
       | otherwise = Right ()
 
 validateQueryAtom :: InterpreterState -> Atom -> Either String ()
-validateQueryAtom state atom
+validateQueryAtom state atom@(Atom name terms)
   | predName atom `Set.member` isAuxNames state =
       Left "Generated predicates cannot be queried"
+  | Just inputArity <- Map.lookup name patternArities
+  , any (not . isGroundTerm) (take inputArity terms) =
+      Left "Pattern-function query inputs must be ground"
   | otherwise = validateRuntimeSignatures state [atom]
+  where
+    patternArities = patternFunctionInputArities
+      (isProgram state) (isPFNames state)
 
 validateRuntimeSignatures :: InterpreterState -> [Atom] -> Either String ()
 validateRuntimeSignatures state extraAtoms = do
@@ -768,18 +774,35 @@ renameRuleVars depth idx rule =
 -- Executable-profile validation
 -- ============================================================
 
--- | Forward rules must be range restricted.  PF-defining clauses are
--- relational and are checked dynamically by ground callers instead.
+-- | Forward rules and pattern-function clauses must be range restricted.
+-- Pattern functions use an input/output mode: matching a ground call binds
+-- variables in the input positions, and a successful body must ground the
+-- relational output position.
 validateExecutableProfile :: NormalProgram -> Set Name -> Either String ()
-validateExecutableProfile prog pfNames = mapM_ validateRule fcRules
+validateExecutableProfile prog pfNames = mapM_ validateRule prog
   where
-    fcRules = filter (\r -> predName (nrHead r) `Set.notMember` pfNames) prog
-    validateRule rule =
+    patternArities = patternFunctionInputArities prog pfNames
+    validateRule rule@(NormalRule conditions (Atom headName headTerms)) =
       let positives = filter (not . ncNegated) (nrConditions rule)
-          bound = bindingFixedPoint positives
-          observed = Set.union
-            (fvAtom (nrHead rule))
-            (Set.unions [fvAtom (ncAtom c) | c <- nrConditions rule, ncNegated c])
+          (initiallyBound, headObserved) =
+            case Map.lookup headName patternArities of
+              Nothing -> (Set.empty, fvAtom (nrHead rule))
+              Just inputArity ->
+                let (inputs, outputs) = splitAt inputArity headTerms
+                in ( Set.unions (map fvTerm inputs)
+                   , Set.unions (map fvTerm outputs)
+                   )
+          bound = bindingFixedPoint patternArities initiallyBound positives
+          patternInputs = Set.unions
+            [ Set.unions (map fvTerm (take inputArity terms))
+            | NormalCond _ False (Atom name terms) <- positives
+            , Just inputArity <- [Map.lookup name patternArities]
+            ]
+          observed = Set.unions
+            [ headObserved
+            , patternInputs
+            , Set.unions [fvAtom (ncAtom c) | c <- conditions, ncNegated c]
+            ]
           unsafe = observed `Set.difference` bound
       in if Set.null unsafe
            then Right ()
@@ -787,15 +810,32 @@ validateExecutableProfile prog pfNames = mapM_ validateRule fcRules
                     ++ "variable(s) " ++ show (Set.toList unsafe)
                     ++ " are observed before being grounded: " ++ show rule
 
-bindingFixedPoint :: [NormalCond] -> Set Var
-bindingFixedPoint conds = go Set.empty
+patternFunctionInputArities :: NormalProgram -> Set Name -> Map Name Int
+patternFunctionInputArities prog pfNames = Map.fromList
+  [ (name, length terms - 1)
+  | rule <- prog
+  , let Atom name terms = nrHead rule
+  , name `Set.member` pfNames
+  , not (null terms)
+  ]
+
+bindingFixedPoint :: Map Name Int -> Set Var -> [NormalCond] -> Set Var
+bindingFixedPoint patternArities initiallyBound conds = go initiallyBound
   where
     go bound =
-      let bound' = foldl bindFromCondition bound conds
+      let bound' = foldl (bindFromCondition patternArities) bound conds
       in if bound' == bound then bound else go bound'
 
-bindFromCondition :: Set Var -> NormalCond -> Set Var
-bindFromCondition bound cond = case ncAtom cond of
+bindFromCondition :: Map Name Int -> Set Var -> NormalCond -> Set Var
+bindFromCondition patternArities bound cond = case ncAtom cond of
+  Atom name terms
+    | Just inputArity <- Map.lookup name patternArities ->
+        let (inputs, outputs) = splitAt inputArity terms
+            inputVars = Set.unions (map fvTerm inputs)
+            outputVars = Set.unions (map fvTerm outputs)
+        in if inputVars `Set.isSubsetOf` bound
+             then Set.union bound outputVars
+             else bound
   Atom "true" [] -> bound
   Atom "false" [] -> bound
   Atom "=" [left, right] -> bindEquality bound left right
@@ -803,8 +843,8 @@ bindFromCondition bound cond = case ncAtom cond of
     | fvTerm expr `Set.isSubsetOf` bound -> Set.union bound (fvTerm result)
     | otherwise -> bound
   Atom op _ | op `elem` [">", "<", ">=", "<="] -> bound
-  -- A successful at/1 call and a successful world/PF relation lookup bind
-  -- every variable in the matched atom to a ground term in this profile.
+  -- A successful lookup against a stored world predicate binds every
+  -- variable in the matched atom to a ground term.
   atom -> Set.union bound (fvAtom atom)
 
 bindEquality :: Set Var -> Term -> Term -> Set Var

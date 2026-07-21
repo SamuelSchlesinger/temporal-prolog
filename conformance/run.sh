@@ -3,12 +3,14 @@ set -eu
 
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/temporal-prolog-conformance.XXXXXX")
 trap 'rm -rf "$work_dir"' EXIT HUP INT TERM
+rust_target_dir=$work_dir/rust-target
 
 cabal build temporal-prolog-run >/dev/null
-cargo build --quiet --manifest-path rust/Cargo.toml --bin temporal-prolog-rs
+CARGO_TARGET_DIR=$rust_target_dir \
+  cargo build --quiet --manifest-path rust/Cargo.toml --bin temporal-prolog-rs
 
 haskell_runner=$(cabal list-bin temporal-prolog-run)
-rust_runner=rust/target/debug/temporal-prolog-rs
+rust_runner=$rust_target_dir/debug/temporal-prolog-rs
 
 check_case() {
   case_name=$1
@@ -91,6 +93,8 @@ reject_case for-zero conformance/rejections/for_zero.tpl
 reject_case missing-period conformance/rejections/missing_period.tpl
 reject_case plain-previous-term conformance/rejections/plain_previous_term.tpl
 reject_case unsafe-range conformance/rejections/unsafe_range.tpl
+reject_case unsafe-pattern-input conformance/rejections/unsafe_pattern_input.tpl
+reject_case unsafe-pattern-output conformance/rejections/unsafe_pattern_output.tpl
 reject_case mixed-predicate-arity conformance/rejections/mixed_predicate_arity.tpl
 reject_case mixed-constructor-arity conformance/rejections/mixed_constructor_arity.tpl
 reject_case mixed-pattern-arity conformance/rejections/mixed_pattern_arity.tpl

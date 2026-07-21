@@ -267,9 +267,24 @@ fn shared_rejection_cases() {
         assert!(compile(source).is_err(), "accepted {name}: {source:?}");
     }
 
-    let unsafe_program = compile(include_str!(
-        "../../conformance/rejections/unsafe_range.tpl"
-    ))
-    .unwrap();
-    assert!(Interpreter::new(unsafe_program).step_all().is_err());
+    for (name, source) in [
+        (
+            "unsafe range",
+            include_str!("../../conformance/rejections/unsafe_range.tpl"),
+        ),
+        (
+            "ungrounded pattern-function input",
+            include_str!("../../conformance/rejections/unsafe_pattern_input.tpl"),
+        ),
+        (
+            "ungrounded pattern-function output",
+            include_str!("../../conformance/rejections/unsafe_pattern_output.tpl"),
+        ),
+    ] {
+        let unsafe_program = compile(source).unwrap();
+        assert!(
+            Interpreter::new(unsafe_program).step_all().is_err(),
+            "executed {name}: {source:?}"
+        );
+    }
 }

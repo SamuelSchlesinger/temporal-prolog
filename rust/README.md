@@ -11,7 +11,11 @@ the paper's fixed symbol signatures before normalization, including the
 input/output arity relationship for pattern functions and the reserved
 signatures of built-in operations. The interpreter preserves those signatures
 across runtime inputs and prior worlds, prevents assertion of internal
-relations, and evaluates built-ins through the public query API.
+relations, and evaluates built-ins through the public query API. A normalized
+pattern-function relation requires its input positions to be ground before a
+call; success binds its final output position. Definitions must ground that
+output from their matched inputs and positive conditions, and public queries
+enforce the same input mode.
 Source `for` counts are likewise retained exactly. Compilation admits the
 portable limit of 1,000 repetitions and rejects larger counts before expansion,
 so behavior cannot depend on the host's pointer width.

@@ -216,6 +216,25 @@ fn conditional_pattern_function_reduction_executes() {
 }
 
 #[test]
+fn pattern_function_calls_require_grounded_inputs() {
+    let state = state("identity(X) -> X. identity(X) = a => leaked.");
+    assert!(state.step_all().is_err());
+}
+
+#[test]
+fn pattern_function_clauses_must_ground_their_outputs() {
+    let state = state("wild(X) -> Y. result(wild(a)).");
+    assert!(state.step_all().is_err());
+}
+
+#[test]
+fn positive_conditions_may_ground_pattern_function_outputs() {
+    let mut state = state("value(a). value(Y) => choose(X) -> Y. result(choose(key)).");
+    state.step().unwrap();
+    assert!(contains(&state, "result(a)"));
+}
+
+#[test]
 fn previous_negation_inside_pattern_function_is_false_in_world_zero() {
     let mut state = state(
         "@~blocked(X) => choose(X) -> selected. \
@@ -517,6 +536,13 @@ fn public_query_resolves_recursive_pattern_functions() {
     assert!(answers
         .iter()
         .any(|substitution| substitution.get("Z") == Some(&expected)));
+}
+
+#[test]
+fn public_pattern_function_queries_require_grounded_inputs() {
+    let state = state("identity(X) -> X.");
+    assert!(state.query(&atom("identity(X,Y)")).is_err());
+    assert!(state.query(&atom("identity(a,Y)")).is_ok());
 }
 
 #[test]

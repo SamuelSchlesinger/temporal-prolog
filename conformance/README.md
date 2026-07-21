@@ -26,7 +26,8 @@ exactly 1,000 and 1,001 Step-1 rewrite rounds, proving that the shared resource
 boundary is inclusive and that the following round is rejected. Negative cases
 additionally cover mixed predicate, constructor, and pattern-function arities;
 malformed pattern-function relational calls; malformed built-in and arithmetic
-signatures; and attempts to define an external built-in as a stored result.
+signatures; ungrounded pattern-function inputs and outputs; and attempts to
+define an external built-in as a stored result.
 The negative corpus also rejects unparenthesized chains of non-associative
 past-time condition operators, non-ASCII identifiers, and `for` counts beyond
 the portable executable expansion limit. Positive lexical

@@ -602,8 +602,7 @@ eventuallyNextSpec = describe "Eventually and Next operators" $ do
 patternFunctionSpec :: Spec
 patternFunctionSpec = describe "Pattern function expansion" $ do
   it "ground wrap: wrap(hello) -> box(hello). result(wrap(hello))." $ do
-    -- Pattern functions with variables produce non-ground facts that the
-    -- interpreter filters out. Ground instances work correctly.
+    -- The ground call supplies the clause input and produces a ground result.
     let prog = "wrap(hello) -> box(hello).\nresult(wrap(hello)).\n"
     let st = runWithAssertions prog [] 1
     worldContains st "result(box(hello))" `shouldBe` True
@@ -779,6 +778,28 @@ safetyValidationSpec = describe "Safety validation" $ do
     let np = parseAndNormalize "~p(X) => q(X).\n"
     stepWorld (newInterpreterState np Set.empty) `shouldSatisfy` isLeft
 
+  it "rejects a pattern-function call whose inputs are not grounded" $ do
+    let (np, pfNames) = parseAndNormalizeWithPF $ unlines
+          [ "identity(X) -> X."
+          , "identity(X) = a => leaked."
+          ]
+    stepWorld (newInterpreterState np pfNames) `shouldSatisfy` isLeft
+
+  it "rejects a pattern-function clause with an ungrounded output" $ do
+    let (np, pfNames) = parseAndNormalizeWithPF $ unlines
+          [ "wild(X) -> Y."
+          , "result(wild(a))."
+          ]
+    stepWorld (newInterpreterState np pfNames) `shouldSatisfy` isLeft
+
+  it "accepts a pattern-function output grounded by a positive condition" $ do
+    let st = runWithAssertions (unlines
+          [ "value(a)."
+          , "value(Y) => choose(X) -> Y."
+          , "result(choose(key))."
+          ]) [] 1
+    worldContains st "result(a)" `shouldBe` True
+
 -- ============================================================
 -- K-M. Edge cases
 -- ============================================================
@@ -838,6 +859,14 @@ runtimeBoundarySpec = describe "Runtime query and input validation" $ do
       `shouldBe` Right [Map.singleton "N" (integer "0")]
     queryAtomEither (Atom "true" []) state `shouldBe` Right [Map.empty]
     queryAtomEither (Atom "false" []) state `shouldBe` Right []
+
+  it "requires public pattern-function query inputs to be ground" $ do
+    let (program, pfNames) = parseAndNormalizeWithPF "identity(X) -> X."
+        state = newInterpreterState program pfNames
+    queryAtomEither (Atom "identity" [TVar "X", TVar "Y"]) state
+      `shouldSatisfy` isLeft
+    queryAtomEither (Atom "identity" [TFun "a" [], TVar "Y"]) state
+      `shouldSatisfy` isRight
 
   it "rejects malformed runtime queries instead of treating them as false" $ do
     let (program, pfNames) = parseAndNormalizeWithPF
@@ -1461,7 +1490,6 @@ sharedConformanceSpec = describe "Shared Haskell/Rust conformance corpus" $ do
     forZero <- readFile "conformance/rejections/for_zero.tpl"
     plainPrevious <- readFile "conformance/rejections/plain_previous_term.tpl"
     missingPeriod <- readFile "conformance/rejections/missing_period.tpl"
-    unsafeRange <- readFile "conformance/rejections/unsafe_range.tpl"
     compileSource forZero `shouldSatisfy` isLeft
     compileSource plainPrevious `shouldSatisfy` isLeft
     parseProgram "<test>" missingPeriod `shouldSatisfy` isLeft
@@ -1479,10 +1507,16 @@ sharedConformanceSpec = describe "Shared Haskell/Rust conformance corpus" $ do
       ] $ \filename -> do
         source <- readFile ("conformance/rejections/" ++ filename)
         compileSource source `shouldSatisfy` isLeft
-    case compileSource unsafeRange of
-      Left err -> expectationFailure err
-      Right (np, pfNames) ->
-        stepWorld (newInterpreterState np pfNames) `shouldSatisfy` isLeft
+    forM_
+      [ "unsafe_range.tpl"
+      , "unsafe_pattern_input.tpl"
+      , "unsafe_pattern_output.tpl"
+      ] $ \filename -> do
+        source <- readFile ("conformance/rejections/" ++ filename)
+        case compileSource source of
+          Left err -> expectationFailure err
+          Right (np, pfNames) ->
+            stepWorld (newInterpreterState np pfNames) `shouldSatisfy` isLeft
 
 batchExecutionSpec :: Spec
 batchExecutionSpec = describe "Deterministic branch-preserving batch execution" $ do

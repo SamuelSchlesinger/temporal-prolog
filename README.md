@@ -245,6 +245,12 @@ be used inside rule conditions and heads:
 a(X) /\ b(Y) => combined(append(X, Y)).
 ```
 
+Their normalized relation has an input/output mode. For a function with `k`
+arguments, the first `k` relational arguments must already be ground; a
+successful call then binds the final result argument. Each definition must in
+turn ground that result from its matched inputs and positive body conditions.
+The public query API enforces the same ground-input rule.
+
 The conditional reduction form from Section 5.1 of the paper is also
 supported:
 
@@ -391,7 +397,8 @@ Pattern function definitions are normalized into predicate clauses (e.g.
 `append([], X) -> X.` becomes the clause `append([], X, X).`). When a rule
 condition references a pattern-function predicate, the interpreter resolves it
 via backward chaining (SLD-resolution) rather than world lookup, so recursive
-definitions work naturally.
+definitions work naturally. A relational call such as `append(A, B, Result)`
+requires `A` and `B` to be ground before the call; success binds `Result`.
 
 ### Mutual exclusion
 
@@ -465,6 +472,8 @@ The implementation follows a five-phase pipeline:
    `false`) are evaluated specially in both rule conditions and public
    queries. Runtime atoms are signature-checked before assertion or query;
    generated predicates and pattern-function relations cannot be asserted.
+   Pattern-function queries additionally require every input position to be
+   ground, while leaving the final result position available for binding.
 
 4. **Model-check** (`TemporalProlog.ModelChecker`): A breadth-first bounded
    explorer applies every Cartesian product of configured input choices to
