@@ -167,6 +167,19 @@ parserSpec = describe "Parser" $ do
   it "parses once conditions" $ do
     parseCond "<test>" "?p(X)" `shouldSatisfy` isRight
 
+  it "preserves documented Unicode operator families" $ do
+    let p = CAtom (Atom "p" [])
+    parseCond "<test>" "●p" `shouldBe` Right (CPrev p)
+    parseCond "<test>" "•p" `shouldBe` Right (CPrev p)
+    parseCond "<test>" "■p" `shouldBe` Right (CHasBeen p)
+    parseCond "<test>" "◆p" `shouldBe` Right (COnce p)
+    parseCond "<test>" "◇p" `shouldBe` Right (CEventually p)
+    parseRule "<test>" "a ⇒ ○b." `shouldBe` Right
+      (Rule [CAtom (Atom "a" [])] (RNext (RAtom (Atom "b" []))))
+    parseRule "<test>" "□p." `shouldBe` Right
+      (Fact (RAlways (RAtom (Atom "p" []))))
+    parseProgram "<test>" "identity(X) → X." `shouldSatisfy` isRight
+
   it "parses since/after/for" $ do
     parseCond "<test>" "a since b" `shouldSatisfy` isRight
     parseCond "<test>" "a after b" `shouldSatisfy` isRight
@@ -1358,6 +1371,13 @@ sharedConformanceSpec = describe "Shared Haskell/Rust conformance corpus" $ do
     worldContains st "right" `shouldBe` True
     worldContains st "bell" `shouldBe` True
     worldContains st "light" `shouldBe` True
+
+  it "executes every documented Unicode alias" $ do
+    src <- readFile "conformance/cases/unicode_aliases.tpl"
+    let st = runWithAssertions src [] 2
+    worldContains st "value(token)" `shouldBe` True
+    worldContains st "next_fact" `shouldBe` True
+    worldContains st "unicode_ok" `shouldBe` True
 
   it "keeps keyword constructors and arithmetic predicate names contextual" $ do
     keywordSource <- readFile "conformance/cases/keyword_constructors.tpl"

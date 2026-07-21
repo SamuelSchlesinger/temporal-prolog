@@ -26,7 +26,9 @@ signatures; and attempts to define an external built-in as a stored result.
 The negative corpus also rejects unparenthesized chains of non-associative
 past-time condition operators and non-ASCII identifiers. Positive lexical
 cases verify contextual keyword reservation and the separation of arithmetic
-term operators from the predicate namespace.
+term operators from the predicate namespace. A positive lexical case executes
+every documented Unicode alias, including both previous-time dot glyphs, and
+distinguishes the black- and white-diamond source operators.
 The executable gate also rejects scheduled inputs that change predicate or
 constructor arity, reuse a pattern-function or generated predicate, inject a
 built-in or term-level previous wrapper, or change a dynamically introduced

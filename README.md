@@ -158,7 +158,7 @@ Use `:history` to see all worlds at once.
 
 | ASCII | Unicode | Position  | Meaning                                     |
 |-------|---------|-----------|---------------------------------------------|
-| `@`   | `●`     | Condition | **Previous** -- true at the previous time   |
+| `@`   | `●` / `•` | Condition | **Previous** -- true at the previous time   |
 | `~`   | `¬`     | Condition | **Negation** -- negation-as-failure         |
 | `#`   | `■`     | Condition | **Has-been** -- true at every step from 0   |
 | `?`   | `◆`     | Condition | **Once** -- true at some past step          |
@@ -170,6 +170,11 @@ Use `:history` to see all worlds at once.
 | `until`  | --   | Result    | `r until c` -- r holds until c becomes true |
 | `atnext` | --   | Result    | `r atnext c` -- r fires when c next holds   |
 | `next`   | `○`  | Result    | **Next** -- holds at the next time step     |
+
+Both U+25CF BLACK CIRCLE (`●`) and U+2022 BULLET (`•`) spell previous
+time. U+25C6 BLACK DIAMOND (`◆`) spells `once`, while U+25C7 WHITE DIAMOND
+(`◇`) spells `eventually`. The last two normalize to the same past-existential
+semantics but remain distinct constructors in the source AST.
 
 ### Names and namespaces
 

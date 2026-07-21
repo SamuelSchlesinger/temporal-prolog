@@ -11,11 +11,13 @@
 -- =>        ⇒         implication
 -- /\\       ∧         conjunction
 -- ->        →         pattern function arrow
--- \@        ●         previous-time operator
+-- \@        ● or •    previous-time operator
 -- ~         ¬         negation
 -- #         ■         has-been (continuously true from start)
 -- ?         ◆         once (true at some past time)
+-- eventually ◇         eventually (past-time synonym for once)
 -- always    □         always (henceforth)
+-- next      ○         next-time result
 -- @
 --
 -- Condition precedence (tightest to loosest):
@@ -104,7 +106,7 @@ opArrow :: Parser ()
 opArrow = void (symbol "->" <|> symbol "\x2192")  -- →
 
 opPrev :: Parser Char
-opPrev = lexeme (char '@' <|> char '\x25CF')  -- ●
+opPrev = lexeme (char '@' <|> char '\x25CF' <|> char '\x2022')  -- ● or •
 
 opNeg :: Parser Char
 opNeg = lexeme (char '~' <|> char '\x00AC')  -- ¬

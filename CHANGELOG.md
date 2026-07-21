@@ -57,6 +57,9 @@
 * Make keyword reservation contextual across disjoint predicate and constructor
   namespaces, admit prefix external-predicate syntax, and enforce ASCII-only
   identifiers consistently in both parsers.
+* Align every Unicode operator alias across both parsers, accept both documented
+  previous-time dot glyphs, and preserve the distinct `once` and `eventually`
+  source AST constructors.
 
 ## 0.1.0.0 -- 2026-03-18
 

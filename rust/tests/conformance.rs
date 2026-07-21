@@ -139,6 +139,21 @@ fn result_temporal_operators_scope_over_complete_conjunctions() {
 }
 
 #[test]
+fn documented_unicode_aliases_execute_together() {
+    let mut state = Interpreter::new(
+        compile(include_str!("../../conformance/cases/unicode_aliases.tpl")).unwrap(),
+    );
+    state.step().unwrap();
+    state.step().unwrap();
+    for expected in ["value(token)", "next_fact", "unicode_ok"] {
+        assert!(
+            state.world().unwrap().contains(&atom(expected)),
+            "missing {expected}"
+        );
+    }
+}
+
+#[test]
 fn contextual_names_follow_their_namespace() {
     let mut keyword_state = Interpreter::new(
         compile(include_str!(

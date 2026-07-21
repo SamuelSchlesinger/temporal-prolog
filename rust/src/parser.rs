@@ -138,7 +138,8 @@ fn lex(source: &str) -> Result<Vec<Token>, String> {
             '@' | '●' | '•' => tokens.push(Token::At),
             '~' | '¬' => tokens.push(Token::Tilde),
             '#' | '■' => tokens.push(Token::Hash),
-            '?' | '◆' | '◇' => tokens.push(Token::Question),
+            '?' | '◆' => tokens.push(Token::Question),
+            '◇' => tokens.push(Token::Ident("eventually".into())),
             '□' => tokens.push(Token::Ident("always".into())),
             '○' => tokens.push(Token::Ident("next".into())),
             '∧' => tokens.push(Token::And),
@@ -833,8 +834,10 @@ mod tests {
     fn parses_unicode_operator_aliases() {
         assert!(matches!(condition("¬p"), Ok(Cond::Neg(_))));
         assert!(matches!(condition("●p"), Ok(Cond::Prev(_))));
+        assert!(matches!(condition("•p"), Ok(Cond::Prev(_))));
         assert!(matches!(condition("■p"), Ok(Cond::HasBeen(_))));
         assert!(matches!(condition("◆p"), Ok(Cond::Once(_))));
+        assert!(matches!(condition("◇p"), Ok(Cond::Eventually(_))));
         assert!(parse_program("a ⇒ ○b.").is_ok());
         assert!(parse_program("□p.").is_ok());
     }

@@ -22,6 +22,7 @@
 \newcommand{\prev}{\mathbin{\bullet}}
 \newcommand{\alwayspast}{\mathbin{\blacksquare}}
 \newcommand{\once}{\mathbin{\blacklozenge}}
+\newcommand{\eventuallypast}{\mathbin{\lozenge}}
 \newcommand{\alwaysfuture}{\mathbin{\square}}
 \newcommand{\sem}[1]{\llbracket #1 \rrbracket}
 \newcommand{\FV}{\operatorname{fv}}
@@ -195,6 +196,7 @@ ASCII & Unicode & Meaning \\
 \verb|~| & $\neg$ & negation \\
 \verb|#| & $\alwayspast$ & continuously in the past \\
 \verb|?| & $\once$ & once in the past \\
+\verb|eventually| & $\eventuallypast$ & once in the past \\
 \verb|always| & $\alwaysfuture$ & henceforth \\
 \verb|next| & $\bigcirc$ & next time \\
 \bottomrule
@@ -202,6 +204,13 @@ ASCII & Unicode & Meaning \\
 \caption{Portable ASCII spellings and accepted Unicode aliases.}
 \label{tab:aliases}
 \end{table}
+
+Both \texttt{U+25CF} BLACK CIRCLE and \texttt{U+2022} BULLET are accepted
+aliases for \verb|@|.  \texttt{U+25C6} BLACK DIAMOND is the Unicode spelling of
+\verb|?|, while \texttt{U+25C7} WHITE DIAMOND is the Unicode spelling of
+\verb|eventually|.  Implementations MUST preserve those operator families in
+the parsed source AST, even though \verb|?| and \verb|eventually| normalize to
+the same past-existential semantics.
 
 \subsection{Well-formed terms and formulas}
 

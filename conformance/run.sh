@@ -52,6 +52,7 @@ check_case future-results-internal conformance/cases/future_results.tpl --steps 
   --assert 0:trigger --assert 2:release --assert 2:stop --include-internal
 check_case result-precedence conformance/cases/result_precedence.tpl --steps 2 \
   --assert 0:start --assert 0:arm --assert 1:fire
+check_case unicode-aliases conformance/cases/unicode_aliases.tpl --steps 2
 check_case keyword-constructors conformance/cases/keyword_constructors.tpl --steps 1
 check_case arithmetic-predicates conformance/cases/arithmetic_predicates.tpl --steps 1 \
   --assert '0:div(a,b)' --assert '0:mod(c,d)'
