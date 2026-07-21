@@ -2,8 +2,15 @@
 name = "temporal-prolog"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.74"
 license = "MIT"
 description = "Independent Rust implementation of Sakuragawa Temporal Prolog"
+repository = "https://github.com/SamuelSchlesinger/temporal-prolog"
+homepage = "https://github.com/SamuelSchlesinger/temporal-prolog"
+documentation = "https://docs.rs/temporal-prolog"
+readme = "README.md"
+keywords = ["logic-programming", "prolog", "temporal-logic"]
+categories = ["compilers", "science"]
 
 [lib]
 name = "temporal_prolog"

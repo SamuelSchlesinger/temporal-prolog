@@ -19,15 +19,32 @@ author:          Samuel Schlesinger
 maintainer:      sgschlesinger@gmail.com
 build-type:      Simple
 tested-with:     GHC == 9.6.7
-extra-doc-files: CHANGELOG.md
+extra-doc-files:
+    CHANGELOG.md
+    README.md
+    examples/WALKTHROUGH.md
+    output/pdf/temporal-prolog-specification.pdf
+    spec/temporal-prolog.tex
 extra-source-files:
+    benchmarks/README.md
+    benchmarks/results-2026-07-21.md
+    benchmarks/run.sh
+    conformance/README.md
+    conformance/run.sh
     conformance/cases/*.tpl
     conformance/rejections/*.tpl
+    examples/*.tpl
     examples/model-checking/*.tpl
     examples/model-checking/*.tpmc
     examples/model-checking/*.expected
     examples/model-checking/*.expected.dot
     examples/model-checking/README.md
+    rust/Cargo.lock
+    rust/Cargo.toml
+    rust/README.md
+    rust/src/*.rs
+    rust/src/bin/*.rs
+    rust/tests/*.rs
 
 common warnings
     ghc-options: -Wall
@@ -41,14 +58,16 @@ library
         TemporalProlog.PrettyPrint
         TemporalProlog.Normalizer
         TemporalProlog.Interpreter
+        TemporalProlog.Batch
         TemporalProlog.Scenario
         TemporalProlog.ModelChecker
     build-depends:
         base ^>=4.18.3.0,
-        containers,
-        megaparsec,
-        mtl,
-        text
+        bytestring >=0.11 && <0.13,
+        containers >=0.6 && <0.8,
+        megaparsec >=9.6 && <10,
+        mtl >=2.3 && <2.4,
+        text >=2.0 && <2.2
     hs-source-dirs:   src
     default-language: Haskell2010
 
@@ -72,7 +91,7 @@ executable temporal-prolog
         base ^>=4.18.3.0,
         temporal-prolog,
         containers,
-        haskeline,
+        haskeline >=0.8 && <0.9,
         megaparsec,
         mtl,
         text
@@ -95,8 +114,23 @@ executable temporal-prolog-check
     build-depends:
         base ^>=4.18.3.0,
         temporal-prolog,
-        directory,
-        filepath,
+        directory >=1.3 && <1.4,
+        filepath >=1.4 && <1.6,
         megaparsec
     hs-source-dirs:   model-checker
     default-language: Haskell2010
+
+executable temporal-prolog-run
+    import:           warnings
+    main-is:          Main.hs
+    build-depends:
+        base ^>=4.18.3.0,
+        temporal-prolog,
+        containers,
+        megaparsec
+    hs-source-dirs:   runner
+    default-language: Haskell2010
+
+source-repository head
+    type:     git
+    location: https://github.com/SamuelSchlesinger/temporal-prolog.git

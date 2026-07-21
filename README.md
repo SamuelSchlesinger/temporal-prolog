@@ -48,13 +48,24 @@ cd rust && cargo build
 cabal run temporal-prolog
 ```
 
-The Rust implementation provides a batch runner that preserves every minimal
-branch:
+Both implementations provide matching batch runners that preserve every
+minimal branch and print complete, deterministic world histories:
 
 ```sh
+cabal run temporal-prolog-run -- \
+  conformance/cases/negative_cycle.tpl --steps 1
+
 cargo run --manifest-path rust/Cargo.toml --bin temporal-prolog-rs -- \
   conformance/cases/negative_cycle.tpl --steps 1
 ```
+
+Their output is byte-identical, including a digest of the complete raw state.
+Schedule external inputs with repeated `--assert STEP:ATOM` options and use
+`--include-internal` to display normalization auxiliaries. Invalid groundness,
+step counts, and out-of-horizon inputs are rejected rather than ignored.
+
+Run `sh conformance/run.sh` to execute the positive and negative shared corpus
+through both binaries and fail on any output or acceptance mismatch.
 
 Run `sh benchmarks/run.sh 100` for the matched digest-checked comparison.
 
@@ -394,6 +405,12 @@ The implementation follows a three-phase pipeline:
    The Rust `model_checker` module implements the same algorithm and produces
    byte-identical summaries and graphs for the shared examples.
 
+5. **Differentially validate** (`TemporalProlog.Batch`, `rust::batch`): The
+   matching batch runners preserve all minimal branches, canonically sort
+   complete histories, and hash the full raw state. The shared conformance gate
+   compares byte-for-byte output across temporal operators, pattern functions,
+   arithmetic, recursion through negation, and specified rejection cases.
+
 At world 0, every previous-time formula `@F` is false, exactly as defined in
 Section 5.2. In particular, `@~p` is false there, while `~@p` is true; the
 normalizer introduces the auxiliary predicate required by Step 4 to preserve
@@ -419,6 +436,7 @@ Supporting modules:
 - `TemporalProlog.Syntax`: Core AST types (user-facing and normalized)
 - `TemporalProlog.Unification`: First-order term unification with occurs check
 - `TemporalProlog.PrettyPrint`: Human-readable display for all AST types
+- `TemporalProlog.Batch`: Deterministic branch-preserving batch execution
 - `TemporalProlog.Scenario`: Portable schedules and invariant declarations
 - `TemporalProlog.ModelChecker`: Branch exploration, traces, and DOT rendering
 

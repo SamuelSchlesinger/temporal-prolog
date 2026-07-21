@@ -2,6 +2,7 @@
 //! specified in `../spec/temporal-prolog.tex`.
 
 pub mod ast;
+pub mod batch;
 pub mod engine;
 pub mod model_checker;
 pub mod normalize;
@@ -9,6 +10,7 @@ pub mod parser;
 pub mod scenario;
 
 pub use ast::*;
+pub use batch::*;
 pub use engine::*;
 pub use model_checker::*;
 pub use normalize::*;

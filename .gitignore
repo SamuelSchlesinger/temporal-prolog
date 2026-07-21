@@ -7,3 +7,8 @@ rust/target/
 .ghc.environment.*
 cabal.project.local
 *~
+spec/*.aux
+spec/*.log
+spec/*.out
+spec/*.pdf
+spec/*.toc

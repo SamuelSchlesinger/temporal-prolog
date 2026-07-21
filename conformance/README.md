@@ -7,3 +7,16 @@ The Haskell suite in `test/Main.hs` and the Rust integration suite in
 `rust/tests/conformance.rs` assert the same semantic outcomes. Internal fresh
 predicate names are intentionally excluded from comparisons; observable atoms
 and the complete set of minimal branches are compared instead.
+
+`run.sh` is the stronger executable gate: it drives the matching Haskell and
+Rust batch runners with the same scheduled inputs, then compares their complete
+canonical histories and full-state semantic digests byte for byte. It covers
+future and past operators, branching negative cycles, unsupported classical
+blockers, pattern functions, term-level previous, arithmetic, and every shared
+rejection case.
+
+Run it from the repository root:
+
+```sh
+sh conformance/run.sh
+```

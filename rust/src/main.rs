@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
-use temporal_prolog::{compile, parse_atom, semantic_digest, Interpreter};
+use temporal_prolog::{compile, parse_atom, render_batch, run_batch, BatchOptions};
 
 fn main() {
     if let Err(error) = run() {
@@ -22,6 +22,7 @@ fn run() -> Result<(), String> {
     }
     let mut steps = 1usize;
     let mut assertions: BTreeMap<usize, Vec<temporal_prolog::Atom>> = BTreeMap::new();
+    let mut include_internal = false;
     while let Some(option) = args.next() {
         match option.as_str() {
             "--steps" => {
@@ -37,6 +38,7 @@ fn run() -> Result<(), String> {
                 let step: usize = step.parse().map_err(|_| "invalid assertion step")?;
                 assertions.entry(step).or_default().push(parse_atom(atom)?);
             }
+            "--include-internal" => include_internal = true,
             unknown => return Err(format!("unknown option {unknown:?}")),
         }
     }
@@ -44,34 +46,21 @@ fn run() -> Result<(), String> {
     let source = fs::read_to_string(&filename)
         .map_err(|error| format!("cannot read {filename}: {error}"))?;
     let program = compile(&source)?;
-    let mut branches = vec![Interpreter::new(program)];
-    for step in 0..steps {
-        let mut next = Vec::new();
-        for mut branch in branches {
-            for atom in assertions.get(&step).into_iter().flatten() {
-                branch.assert(atom.clone())?;
-            }
-            next.extend(branch.step_all()?);
-        }
-        branches = next;
-    }
-    println!("branches={}", branches.len());
-    for (index, branch) in branches.iter().enumerate() {
-        println!("branch {index}:");
-        if let Some(world) = branch.world() {
-            for atom in world.iter().filter(|atom| {
-                atom.name != "at" && atom.name != "true" && !atom.name.contains("_aux")
-            }) {
-                println!("  {atom}");
-            }
-        }
-        println!("  digest={}", semantic_digest(&branch.worlds));
-    }
+    let result = run_batch(
+        BatchOptions {
+            steps,
+            assertions,
+            include_internal,
+        },
+        program,
+    )?;
+    print!("{}", render_batch(&result));
     Ok(())
 }
 
 fn print_help() {
-    println!("Temporal Prolog Rust batch runner");
+    println!("Temporal Prolog batch runner");
     println!("usage: temporal-prolog-rs PROGRAM [--steps N] [--assert STEP:ATOM]...");
-    println!("all minimal branches are printed; assertions are zero-indexed by world");
+    println!("                          [--include-internal]");
+    println!("all minimal branches and their complete world histories are printed");
 }

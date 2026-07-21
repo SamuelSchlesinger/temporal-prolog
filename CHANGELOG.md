@@ -29,6 +29,11 @@
   pattern-function queries.
 * Cross-check each general evaluator against an independent exhaustive oracle
   over 1,024 generated two-atom programs.
+* Add matching deterministic Haskell and Rust batch runners with complete
+  branch histories, strict schedule validation, and full-state digests.
+* Add a byte-for-byte differential conformance gate spanning all temporal
+  operator families, pattern functions, arithmetic, negative cycles, and
+  shared rejection cases; run both engines, Clippy, and rustfmt in CI.
 
 ## 0.1.0.0 -- 2026-03-18
 

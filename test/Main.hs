@@ -6,6 +6,7 @@ import qualified Data.Map.Strict as Map
 import Data.Either (isLeft, isRight)
 
 import TemporalProlog.Syntax
+import TemporalProlog.Batch
 import TemporalProlog.Parser
 import TemporalProlog.PrettyPrint
 import TemporalProlog.Normalizer
@@ -30,6 +31,7 @@ main = hspec $ do
   backwardChainingSpec
   correctnessAndFeatureSpec
   sharedConformanceSpec
+  batchExecutionSpec
   modelCheckerSpec
   propositionalOracleSpec
 
@@ -1060,6 +1062,33 @@ sharedConformanceSpec = describe "Shared Haskell/Rust conformance corpus" $ do
       Left err -> expectationFailure err
       Right (np, pfNames) ->
         stepWorld (newInterpreterState np pfNames) `shouldSatisfy` isLeft
+
+batchExecutionSpec :: Spec
+batchExecutionSpec = describe "Deterministic branch-preserving batch execution" $ do
+  it "renders complete minimal-model histories canonically" $ do
+    let (program, pfNames) = parseAndNormalizeWithPF "~a => b. ~b => a."
+        options = BatchOptions 1 Map.empty False
+    case runBatch options program pfNames of
+      Left err -> expectationFailure err
+      Right result -> renderBatch result `shouldBe` unlines
+        [ "steps=1"
+        , "branches=2"
+        , "branch=0"
+        , "  w0=[a]"
+        , "  digest=3ac3fa0d287999b7"
+        , "branch=1"
+        , "  w0=[b]"
+        , "  digest=faa2015c6af3d282"
+        ]
+
+  it "rejects unreachable and nonground scheduled assertions" $ do
+    let (program, pfNames) = parseAndNormalizeWithPF "ok."
+        unreachable = BatchOptions 1
+          (Map.singleton 1 [Atom "event" []]) False
+        nonground = BatchOptions 1
+          (Map.singleton 0 [Atom "event" [TVar "X"]]) False
+    runBatch unreachable program pfNames `shouldSatisfy` isLeft
+    runBatch nonground program pfNames `shouldSatisfy` isLeft
 
 modelCheckerSpec :: Spec
 modelCheckerSpec = describe "Portable bounded protocol model checker" $ do

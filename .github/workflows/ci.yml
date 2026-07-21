@@ -1,17 +1,28 @@
 name: CI
 on: [push, pull_request]
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        ghc: ['9.6.7']
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: haskell-actions/setup@v2
         with:
-          ghc-version: ${{ matrix.ghc }}
+          ghc-version: '9.6.7'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - run: cabal update
-      - run: cabal build --enable-tests
-      - run: cabal test
-      - run: cabal haddock
+      - run: cabal build all --enable-tests
+      - run: cabal test all
+      - run: cabal haddock all
+      - run: cabal check
+      - run: cabal sdist
+      - run: cargo fmt --manifest-path rust/Cargo.toml --check
+      - run: cargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path rust/Cargo.toml --all-targets
+      - run: cargo package --manifest-path rust/Cargo.toml
+      - run: sh conformance/run.sh
